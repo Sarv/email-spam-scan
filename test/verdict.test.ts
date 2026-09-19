@@ -5,9 +5,12 @@ import {
   isSpamScore,
   mergeAssessments,
   parseSpamReasons,
+  rollUpAuthStatus,
   spamVerdict,
   SPAM_THRESHOLD,
   SUSPICIOUS_THRESHOLD,
+  unknownAuthStatus,
+  type AuthStatus,
   type SpamReason,
 } from '../src/verdict.js';
 
@@ -168,5 +171,65 @@ describe('mergeAssessments', () => {
       assessmentOf([{ id: 'content-shouting', points: 1, detail: 'second' }]),
     );
     expect(merged.reasons.map((reason) => reason.detail)).toEqual(['first', 'second']);
+  });
+});
+
+describe('unknownAuthStatus', () => {
+  it('asserts nothing about any of the three', () => {
+    expect(unknownAuthStatus()).toEqual({
+      spf: 'unknown',
+      dkim: 'unknown',
+      dmarc: 'unknown',
+      overall: 'none',
+    });
+  });
+
+  // Regression: both producers of an `AuthStatus` fill one in field by field.
+  // A shared frozen constant would have them writing into each other's
+  // results, so one message's verdict would depend on the one scanned before
+  // it — the worst kind of bug to reproduce.
+  it('returns a fresh object every time', () => {
+    const first = unknownAuthStatus();
+    first.spf = 'pass';
+    expect(unknownAuthStatus().spf).toBe('unknown');
+  });
+});
+
+describe('rollUpAuthStatus', () => {
+  const components = (
+    spf: AuthStatus['spf'],
+    dkim: AuthStatus['dkim'],
+    dmarc: AuthStatus['dmarc'],
+  ): Omit<AuthStatus, 'overall'> => ({ spf, dkim, dmarc });
+
+  // Regression: one failure outranks any number of passes. A sender who
+  // controls their own domain can always arrange SPF and DKIM to pass, so two
+  // passes next to a DMARC failure is the SHAPE OF A SPOOF, not a near miss —
+  // rolling it up as `partial` would show the reader a half-green shield on
+  // exactly the message the rules exist to catch.
+  it('reports fail when any one component failed, however many passed', () => {
+    expect(rollUpAuthStatus(components('pass', 'pass', 'fail'))).toBe('fail');
+    expect(rollUpAuthStatus(components('fail', 'unknown', 'unknown'))).toBe('fail');
+    expect(rollUpAuthStatus(components('unknown', 'fail', 'none'))).toBe('fail');
+  });
+
+  it('reports pass only when at least two of the three passed', () => {
+    expect(rollUpAuthStatus(components('pass', 'pass', 'none'))).toBe('pass');
+    expect(rollUpAuthStatus(components('pass', 'pass', 'pass'))).toBe('pass');
+  });
+
+  it('reports partial for a single pass', () => {
+    expect(rollUpAuthStatus(components('pass', 'unknown', 'unknown'))).toBe('partial');
+    expect(rollUpAuthStatus(components('none', 'none', 'pass'))).toBe('partial');
+  });
+
+  // Regression: `none` is the answer for a message nobody asserted anything
+  // about, and `softfail`/`neutral` are assertions that decline to assert.
+  // Neither is a failure, and a UI that painted them red would flag most mail
+  // from small senders.
+  it('reports none when nothing passed and nothing failed', () => {
+    expect(rollUpAuthStatus(components('unknown', 'unknown', 'unknown'))).toBe('none');
+    expect(rollUpAuthStatus(components('softfail', 'none', 'none'))).toBe('none');
+    expect(rollUpAuthStatus(components('neutral', 'unknown', 'none'))).toBe('none');
   });
 });

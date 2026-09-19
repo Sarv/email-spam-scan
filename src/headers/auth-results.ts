@@ -1,4 +1,4 @@
-import type { AuthStatus } from '../verdict.js';
+import { rollUpAuthStatus, unknownAuthStatus, type AuthStatus } from '../verdict.js';
 
 /**
  * Pull the mail-authentication headers out of a raw header block.
@@ -68,7 +68,7 @@ export function extractAuthHeaderBlock(
  * Inbox so that the extraction can be proven at parity first.
  */
 export function parseAuthenticationHeaders(block: string | null | undefined): AuthStatus {
-  const result: AuthStatus = { spf: 'unknown', dkim: 'unknown', dmarc: 'unknown', overall: 'none' };
+  const result = unknownAuthStatus();
   if (!block) return result;
 
   const headers = block.toLowerCase();
@@ -89,13 +89,6 @@ export function parseAuthenticationHeaders(block: string | null | undefined): Au
   else if (headers.includes('dmarc=fail')) result.dmarc = 'fail';
   else if (headers.includes('dmarc=none')) result.dmarc = 'none';
 
-  const components = [result.spf, result.dkim, result.dmarc];
-  const passed = components.filter((value) => value === 'pass').length;
-  const failed = components.filter((value) => value === 'fail').length;
-
-  if (failed > 0) result.overall = 'fail';
-  else if (passed >= 2) result.overall = 'pass';
-  else if (passed >= 1) result.overall = 'partial';
-
+  result.overall = rollUpAuthStatus(result);
   return result;
 }

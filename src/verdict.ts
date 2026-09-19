@@ -99,6 +99,40 @@ export interface AuthStatus {
 }
 
 /**
+ * An `AuthStatus` that asserts nothing: three `unknown` components, `none`
+ * overall.
+ *
+ * A factory rather than a shared frozen constant, because both producers fill
+ * one in field by field and a shared object would have them writing into each
+ * other's results.
+ */
+export function unknownAuthStatus(): AuthStatus {
+  return { spf: 'unknown', dkim: 'unknown', dmarc: 'unknown', overall: 'none' };
+}
+
+/**
+ * The `overall` field, from the three component verdicts.
+ *
+ * One place, because TWO stages produce an `AuthStatus` — the header reader in
+ * `headers/auth-results.ts`, which reports what some other machine wrote down,
+ * and the DNS verifier in `verify.ts`, which works it out itself. A rollup that
+ * drifted between them would show a reader a different shield for the same
+ * message depending on which stage happened to run.
+ *
+ * `fail` beats everything: one component that actively failed is worth more
+ * than two that passed, because the two that passed are the ones a sender who
+ * controls their own domain can always arrange.
+ */
+export function rollUpAuthStatus(components: Omit<AuthStatus, 'overall'>): AuthStatus['overall'] {
+  const values = [components.spf, components.dkim, components.dmarc];
+  if (values.includes('fail')) return 'fail';
+  const passed = values.filter((value) => value === 'pass').length;
+  if (passed >= 2) return 'pass';
+  if (passed >= 1) return 'partial';
+  return 'none';
+}
+
+/**
  * What one stage of the scanner concluded: the points it charged, and why.
  *
  * It lives HERE, with the thresholds, rather than beside the header rules that
