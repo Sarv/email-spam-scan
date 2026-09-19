@@ -18,22 +18,25 @@ score, a verdict, and a list of named reasons a human can read. No service to
 call, no API key, no model to download. Every rule is a small pure function over
 data you already have.
 
-**Status: v0.1.x is the header stage, complete.** Sixteen header rules, the
-sender-identity check, deceptive-link detection and the security-level decision
-are all here, extracted from a mail client that runs them on real mail at
-ingest. What is not here yet is the body-content stage, the attachment stage and
-the streaming API — see [Roadmap](#roadmap). What ships today is listed under
-[What it does today](#what-it-does-today), and nothing else is implied. This
-package will not tell you it checked something it did not check.
+**Status: the header stage, the body-content stage and `scan(rawMessage)`.**
+Sixteen header rules, the sender-identity check, deceptive-link detection, the
+security-level decision, seven body-content rules and a scanner that takes raw
+RFC 5322 bytes are all here, extracted from a mail client that runs them on real
+mail at ingest. What is not here yet is the attachment stage and live
+SPF/DKIM/DMARC verification — see [Roadmap](#roadmap). What ships today is
+listed under [What it does today](#what-it-does-today), and nothing else is
+implied. This package will not tell you it checked something it did not check.
 
 ## Contents
 
 - [Install](#install)
 - [Entry points](#entry-points)
 - [Quick start](#quick-start)
+- [Scanning a whole message](#scanning-a-whole-message)
 - [What it does today](#what-it-does-today)
 - [Scoring model](#scoring-model)
 - [The header rules](#the-header-rules)
+- [The content rules](#the-content-rules)
 - [Security levels](#security-levels)
 - [Reading a stored verdict back](#reading-a-stored-verdict-back)
 - [Origin IP: which address actually sent this](#origin-ip-which-address-actually-sent-this)
@@ -57,28 +60,58 @@ Node 18 or newer. TypeScript types ship with the package; ESM and CJS both work.
 
 ## Entry points
 
-Five, so a browser bundle never has to carry what only a server needs.
+Eight, so a browser bundle never has to carry what only a server needs.
 
 | Import | Dependencies | Use it for |
 | --- | --- | --- |
-| `@sarv-in/email-spam-scan` | `tldts`, `ipaddr.js`, `email-addresses`, `free-email-domains` | Everything. The Node entry — header parsing and the scorer. |
+| `@sarv-in/email-spam-scan` | `tldts`, `ipaddr.js`, `email-addresses`, `htmlparser2`, `postal-mime` | Everything. The Node entry — the scanner, both stages, the header primitives. |
 | `@sarv-in/email-spam-scan/verdict` | **none** | Reading a stored score/reason back — in a renderer, a worker, anywhere. |
+| `@sarv-in/email-spam-scan/headers` | **none** | Reading raw header text: the lookup, and whether the sender declared itself bulk. |
 | `@sarv-in/email-spam-scan/identity` | `tldts` | The sender-spoof rule on its own. |
-| `@sarv-in/email-spam-scan/links` | `tldts` | Deceptive-link detection. Needs a DOM; degrades to "found nothing" without one. |
-| `@sarv-in/email-spam-scan/security` | `tldts` | The five-level decision, for the UI that renders it. |
+| `@sarv-in/email-spam-scan/links` | `tldts`, `htmlparser2` | Deceptive-link detection. |
+| `@sarv-in/email-spam-scan/security` | `tldts`, `htmlparser2` | The five-level decision, for the UI that renders it. |
+| `@sarv-in/email-spam-scan/content` | `tldts`, `htmlparser2` | The body-content stage: vocabulary, quote stripping, link structure. |
+| `@sarv-in/email-spam-scan/scan` | all of the above + `postal-mime` | `scan(rawMessage)` and the bulk stream. The only entry that costs a MIME parser. |
 
 The split exists because the common case in a mail client is displaying a
 verdict that was computed at ingest, hours ago, on a server. That side needs
 thresholds and a JSON parse, not a scanner.
 
-The `links` and `security` entries parse HTML with the ambient `DOMParser`. In a
-browser that is already there; in Node it is not, and every link check returns
-"nothing found" rather than throwing. The one place that is load-bearing is
-`linkDomainsAllMatch`, which returns **false** when there is HTML it could not
-read: the claim it makes is "every link stays on the sender's own domain", and
-that cannot be asserted about evidence nobody looked at.
+**Every entry answers the same question the same way in every environment.**
+Until v0.2 the `links` and `security` entries parsed HTML with the ambient
+`DOMParser`, which meant they found no links at all in Node — the ingest-time
+scorer silently reported "no deceptive links" on every message it ever scored,
+while the renderer running the identical code on the identical message found
+them. HTML is now parsed with `htmlparser2`, so there is one implementation and
+one answer. The entry-point dependency table above is pinned by a test that
+walks the source import graph, so an accidental import cannot quietly add weight
+to a browser bundle.
 
 ## Quick start
+
+Hand it a message and it answers:
+
+```ts
+import { scan } from '@sarv-in/email-spam-scan/scan';
+
+const result = await scan(await readFile('message.eml'), { authserv: 'mx.example.com' });
+
+// {
+//   assessed: true,
+//   score: 10,
+//   verdict: 'spam',
+//   isSpam: true,
+//   suspicious: true,
+//   reasons: [ { id: 'auth-failed', points: 3, detail: 'DMARC failed — …' }, … ],
+//   auth: { spf: 'fail', dkim: 'fail', dmarc: 'fail', overall: 'fail' },
+//   originIp: '185.199.108.1',
+//   message: { messageId: null, subject: 'Re: your account', fromName: 'PayPal Support', … },
+// }
+```
+
+Or use the pieces directly, when you already have them — which is the normal
+case inside a mail client, where the IMAP fetch has handed you an envelope and a
+header block and parsing the message again would be waste:
 
 ```ts
 import {
@@ -125,6 +158,72 @@ const { score, reasons, isSpam } = assessSpamSignals({
 // ]
 ```
 
+## Scanning a whole message
+
+`scan(raw, options)` parses the message with
+[`postal-mime`](https://www.npmjs.com/package/postal-mime), runs the header
+stage and the content stage over it, and returns one JSON verdict — numbers,
+strings and named reason ids, no classes and no functions, so you can store it
+and read it back later with `spamVerdict` and `parseSpamReasons` alone. It takes
+anything `postal-mime` takes: a string, a `Buffer`, a `Uint8Array`, a `Blob` or
+a `ReadableStream`.
+
+**Tell it your authserv-id.** This is the one security decision `scan` makes for
+you, and it is worth understanding. `Authentication-Results` is plain text, and
+every hop that handles a message can write one — including the sender, who can
+simply type `Authentication-Results: dmarc=pass` into their own message before
+sending it. RFC 8601 exists for this: your own boundary MTA stamps its
+authserv-id (usually its hostname) at the start of the header it writes.
+
+```ts
+await scan(raw, { authserv: 'mx.example.com' }); // only that server is believed
+```
+
+Without one, `scan` keeps the **topmost** line of each authentication header and
+discards the rest, on the conventional assumption that your own MTA was the most
+recent hop — headers are prepended, so a forged verdict the sender wrote sits at
+the bottom. That assumption is usually right and occasionally not: a forwarder
+in front of you also prepends. `trustedAuthHeaders(headerLines, authserv?)` is
+exported so you can see exactly which lines survived.
+
+**Other options.** `receivedAt` (unix seconds) is the delivery time the
+date-skew rule compares the sender's `Date:` against; it defaults to the
+timestamp on the topmost `Received:` header, and you should pass your IMAP
+INTERNALDATE instead when you have one, because you trust your own server's
+clock more than a header. `knownSpammer: true` applies the categorical
+5-point rule for a sender the recipient has reported. `ownMail: true` returns
+`assessed: false` with a `null` verdict — not judged, which a UI must not render
+as a green tick.
+
+**Attachments are listed, not scored.** `result.message.attachments` gives you
+filenames and MIME types. The attachment stage is roadmap item 2; until it
+lands, this package will not imply it looked inside them.
+
+### The bulk stream
+
+`scanMany` takes any iterable or async iterable and yields one result per
+message:
+
+```ts
+import { scanMany } from '@sarv-in/email-spam-scan/scan';
+
+for await (const { id, result, error } of scanMany(messages, { concurrency: 8 })) {
+  if (error) log.warn(`${id} could not be read: ${error.message}`);
+  else if (result.isSpam) await file(id, result);
+}
+```
+
+Exactly one of `result` and `error` is set. A message that cannot be read is
+**reported, never thrown**: in a run over a real mailbox, one bad message must
+not end the run and lose the fifty thousand behind it.
+
+Results come back **in input order** even though the scans overlap, because a
+bulk API whose output order depends on how long each message happened to take is
+one nobody can write a stable test — or a resumable job — against. The source is
+consumed lazily and at most `concurrency` messages are held at once, so this
+works on a mailbox larger than memory. Per-message `options` override the shared
+ones.
+
 ## What it does today
 
 **Sender identity** (`assessSender`) — the friendly name claims one brand while
@@ -156,8 +255,27 @@ one of five levels with a per-check breakdown, for the shield or banner a mail
 client shows. The copy is deliberately yours: the library returns levels and
 check ids, never English sentences for the user.
 
-**Verdict plumbing** (`spamVerdict`, `isSpamScore`, `parseSpamReasons`) — the
-thresholds and the stored-reason codec, with no dependencies at all.
+**The body-content stage** (`assessContentSignals`) — seven rules over what the
+message actually says, scored on the sender's **own** words: quoted history,
+signature and the mail client's footer are removed first, so forwarding a phish
+to your IT desk does not score you as the phisher and a long thread does not get
+worse every time somebody hits reply. Listed in full under
+[The content rules](#the-content-rules).
+
+**Body extraction** (`bodyContent`, `extractHtml`, `ownWords`) — the same
+extraction the rules saw, exported so you can show a preview or explain why a
+rule fired. `extractHtml` returns the visible text, the quoted text, the text
+the markup hid from the reader, and every anchor with its visible label.
+
+**The whole pipeline** (`scan`, `scanMany`) — raw RFC 5322 bytes in, one JSON
+verdict out, both stages included. See
+[Scanning a whole message](#scanning-a-whole-message).
+
+**Verdict plumbing** (`spamVerdict`, `isSpamScore`, `parseSpamReasons`,
+`assessmentOf`, `mergeAssessments`) — the thresholds, the stored-reason codec,
+and the seam that combines two stages into one verdict, with no dependencies at
+all. Merging concatenates reasons and re-totals; it never ORs two booleans, so
+two stages that each fall short can still add up to a filing.
 
 ## Scoring model
 
@@ -215,6 +333,50 @@ forwarder that breaks DKIM, a cron job with no `Message-ID`, a home address in
 ask for exactly the headers the rules read. A header a rule reads but the fetch
 never asked for is a rule that silently never fires.
 
+## The content rules
+
+`assessContentSignals({ subject, text, html })` scores what the sender wrote.
+Everything they did not write is removed first: quoted history, the signature
+after a `-- ` delimiter, the mail client's own footer, and anything inside a
+`blockquote` or a client's quote container (`gmail_quote`, `moz-cite-prefix`,
+`yahoo_quoted` and the rest). When both a `text/plain` and a `text/html` part
+exist only the HTML is scored — they say the same thing, and scoring both would
+double every hit for no reason but the MIME shape.
+
+| Reason id | Points | Fires when |
+| --- | --- | --- |
+| `content-spam-vocabulary` | 1–2 | The sender's words match a scam vocabulary group. Once per group, capped at 2 overall |
+| `content-hidden-text` | 2 | 120+ characters the message's own styling hides from the reader |
+| `link-display-mismatch` | 2 each | A link's visible text names one registrable domain while its `href` goes to another. Up to three |
+| `link-userinfo` | 2 | A link hides its destination behind `https://bank.example@evil.example/` |
+| `link-bare-ip` | 2 | A link points straight at an IP address rather than a domain |
+| `content-shouting` | 1 | Four or more consecutive words in capitals, or runs of `!!!` |
+| `link-punycode` | 1 | A link goes to a punycode/IDN domain, which can imitate a familiar name |
+
+**Two kinds of rule, and only one of them is capped.** The vocabulary and
+shouting rules are an *interpretation* of prose; word lists age badly, and a
+filter that can convict on vocabulary alone eventually eats somebody's ordinary
+mail. Together they are worth 3 at the very most — enough to raise a suspicion
+for a human to look at, never enough to reach `SPAM_THRESHOLD`. Matching every
+group in the corpus **and** shouting the whole way through still cannot file a
+message. The hidden-text and link rules are *facts about the bytes* — where a
+link actually points, what the markup hid — and those accumulate without a cap,
+because four of them at once is not a stronger opinion, it is four separate
+deceptions. No single rule anywhere in the stage is worth more than 2 points.
+
+**The word lists are data, in this repo, enrichable by pull request.**
+`src/data/spam-phrases.ts` groups phrases by the scam rather than by the word,
+which is what makes the cap meaningful: twelve pharmacy phrases are one pharmacy
+advert, not twelve pieces of evidence. `src/data/freemail-domains.ts` is the
+freemail corpus, vendored rather than installed: the upstream package fetches
+its list over the network from a `postinstall` script and rewrites its own
+source, which makes every install non-reproducible and can leave a consumer with
+a silently empty list. See the 0.2.0 entry in [CHANGELOG.md](./CHANGELOG.md).
+
+Matching is done on NFKC-normalised, lowercased text with zero-width and soft-
+hyphen characters stripped, on whole-word boundaries. So `ＹＯＵ ＨＡＶＥ ＷＯＮ`
+and `you ha<U+200B>ve won` both match, and `wonderful` does not.
+
 ## Security levels
 
 `assessEmailSecurity` returns one of five, ordered by `LEVEL_RANK`:
@@ -227,7 +389,8 @@ never asked for is a rule that silently never fires.
 | `caution` | Something is off: a deceptive link, or a suspicious score |
 | `danger` | DMARC failed, the display name is spoofed, or the score is over the spam threshold |
 
-`worstLevel(a, b)` combines two, for a thread or a conversation view. The human
+`worstLevel(levels)` reduces several to the worst one, for a thread or a
+conversation view — an empty list is `verified`, nothing to report. The human
 copy for each level is not in this package — a library cannot know your
 product's voice, its language, or its reading age.
 
@@ -271,6 +434,9 @@ above your own trust boundary**. Feed `parseAuthenticationHeaders` the output of
 `extractAuthHeaderBlock`, never a whole raw header dump — otherwise a sender can
 simply write `X-Anything: dmarc=pass` into a message and be believed.
 
+`scan` makes this decision for you from the `authserv` option — see
+[Scanning a whole message](#scanning-a-whole-message).
+
 Real verification, via `mailauth`-style DNS lookups, is on the roadmap as an
 explicitly opt-in stage.
 
@@ -278,14 +444,16 @@ explicitly opt-in stage.
 
 Ordered, and open to contribution — see [CONTRIBUTING.md](./CONTRIBUTING.md).
 
-1. **Body content stage.** Spam vocabulary and deceptive links, scored on the
-   sender's own words rather than the quoted history. Word and domain lists live
-   in this repo as data so they can be enriched by pull request.
+1. ~~**Body content stage.**~~ **Done in 0.2.0** — spam vocabulary and link
+   structure, scored on the sender's own words rather than the quoted history,
+   with the word and domain lists in this repo as data. See
+   [The content rules](#the-content-rules).
 2. **Attachment stage.** What is safely knowable without executing anything:
    dangerous and double extensions, archive contents, macro-bearing Office
    documents, MIME type that disagrees with the magic bytes.
-3. **Streaming API.** `scan(rawMessage)` and a bulk stream, returning the JSON
-   verdict per message.
+3. ~~**Streaming API.**~~ **Done** — `scan(rawMessage)` and `scanMany`,
+   returning the JSON verdict per message. See
+   [Scanning a whole message](#scanning-a-whole-message).
 4. **Real authentication.** Opt-in SPF/DKIM/DMARC verification against DNS.
 5. **Reputation.** DNSBL and similar, in a separate package — it makes network
    calls, so it must never be something you get by accident.
@@ -298,7 +466,9 @@ Ordered, and open to contribution — see [CONTRIBUTING.md](./CONTRIBUTING.md).
 - `spamVerdict(score): 'spam' | 'suspicious' | 'clean' | null`
 - `isSpamScore(score): boolean`
 - `parseSpamReasons(json): SpamReason[]` — never throws
-- `type SpamReason`, `SpamReasonId`, `SpamVerdict`, `AuthStatus`
+- `assessmentOf(reasons): SpamAssessment` — sums and applies both thresholds
+- `mergeAssessments(...parts): SpamAssessment` — combines stages; `null` parts are skipped
+- `type SpamReason`, `SpamReasonId`, `SpamVerdict`, `SpamAssessment`, `AuthStatus`
 
 ### Identity — `@sarv-in/email-spam-scan/identity`
 
@@ -315,24 +485,52 @@ Ordered, and open to contribution — see [CONTRIBUTING.md](./CONTRIBUTING.md).
 - `assessPhishing({ fromName, fromAddress, html }): PhishingAssessment`
 - `LINK_WRAPPER_DOMAINS: Set<string>`
 
+### Scan — `@sarv-in/email-spam-scan/scan`
+
+- `scan(raw, options?): Promise<ScanResult>` — the whole pipeline over one message
+- `scanParsed(email, options?): ScanResult` — the same, over an already-parsed message
+- `scanMany(source, options?): AsyncGenerator<BulkScanResult>` — in input order
+- `trustedAuthHeaders(headerLines, authserv?): string` — which verdicts survived
+- `type ScanOptions`, `ScanResult`, `ScannedMessage`, `RawMessage`, `BulkScanInput`, `BulkScanOptions`, `BulkScanResult`
+
+### Content — `@sarv-in/email-spam-scan/content`
+
+- `assessContentSignals(input): SpamAssessment` — the whole stage
+- `bodyContent(input): BodyContent` — `{ words, anchors, hiddenText }`, what the rules saw
+- `extractHtml(html): HtmlExtract` — `{ text, quotedText, hiddenText, anchors }`
+- `ownWords(text): string` — plain-text body with quotes, signature and footer removed
+- `matchSpamVocabulary(text, groups?): VocabularyHit[]`, `vocabularyPoints(hits)`
+- `normalizeForMatching(text)`, `containsPhrase(haystack, phrase)`, `collapseWhitespace(text)`
+- `longestShoutRun(text): number`
+- `SPAM_PHRASE_GROUPS`, `VOCABULARY_CAP`
+
 ### Security — `@sarv-in/email-spam-scan/security`
 
 - `assessEmailSecurity(input): SecurityAssessment`
-- `worstLevel(a, b): SecurityLevel`
+- `worstLevel(levels): SecurityLevel`
 - `LEVEL_RANK`, `linkRuleKey(senderDomain, shown, actual)`, `parseAuthStatus(json)`
 - `EMPTY_RULES`, `type LinkRuleSets`, `SecurityCheck`, `CheckStatus`
 
-### Headers and rules — `@sarv-in/email-spam-scan`
+### Header reading — `@sarv-in/email-spam-scan/headers`
 
-- `extractAuthHeaderBlock(headers): string | null`
-- `parseAuthenticationHeaders(block): AuthStatus`
-- `extractOriginIp(sources): string | null`
-- `originIpFromAuthHeaders(block)`, `originIpFromReceived(lines)`
-- `normalizeIp(candidate)`, `isPublicIp(candidate)`
+Zero dependencies, so a browser bundle can ask these questions without importing
+the scanner.
+
 - `headerLookupFromText(headers): HeaderLookup`, `headerValueFromText`, `headerValuesFromText`
 - `bulkHeaderSignals(get): BulkHeaderSignals`, `hasBulkHeaderSignal(get)`, `BULK_HEADER_NAMES`
+- `extractAuthHeaderBlock(headers): string | null`
+- `parseAuthenticationHeaders(block): AuthStatus`
+- `receivedAt(lines): number | null`, `receivedAtFromLine(line)` — delivery time from the trace
+
+### Rules and scoring — `@sarv-in/email-spam-scan`
+
+- `extractOriginIp(sources): string | null` — reads headers, but needs an IP parser
+- `originIpFromAuthHeaders(block)`, `originIpFromReceived(lines)`
+- `normalizeIp(candidate)`, `isPublicIp(candidate)`
 - `assessSpamSignals(input): SpamAssessment`, `SPAM_HEADER_NAMES`, `DATE_SKEW_SECONDS`
 - `isFreemailAddress(address)`, `isValidMessageId(id)`, `hasReplyPrefix(subject)`
+- `FREEMAIL_DOMAINS` — the vendored corpus, sorted and lowercased
+- `linkTarget(href): LinkTarget | null`, `urlsInText(text)`, `anchorMismatches(anchors)`
 
 ## Contributing
 
