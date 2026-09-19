@@ -165,7 +165,8 @@ const { score, reasons, isSpam } = assessSpamSignals({
 
 `scan(raw, options)` parses the message with
 [`postal-mime`](https://www.npmjs.com/package/postal-mime), runs the header
-stage and the content stage over it, and returns one JSON verdict — numbers,
+stage, the content stage and the attachment stage over it, and returns one JSON
+verdict — numbers,
 strings and named reason ids, no classes and no functions, so you can store it
 and read it back later with `spamVerdict` and `parseSpamReasons` alone. It takes
 anything `postal-mime` takes: a string, a `Buffer`, a `Uint8Array`, a `Blob` or
@@ -198,9 +199,12 @@ clock more than a header. `knownSpammer: true` applies the categorical
 `assessed: false` with a `null` verdict — not judged, which a UI must not render
 as a green tick.
 
-**Attachments are listed, not scored.** `result.message.attachments` gives you
-filenames and MIME types. The attachment stage is roadmap item 2; until it
-lands, this package will not imply it looked inside them.
+**Attachments are scored; their bytes are not handed back.**
+`result.message.attachments` gives you each filename and MIME type, and the
+`attachment-*` reasons say what the stage made of them — see
+[The attachment rules](#the-attachment-rules). The content itself is left out
+deliberately: it is the largest thing in a message, and a verdict you store
+should stay small enough to store.
 
 ### The bulk stream
 
