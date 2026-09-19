@@ -28,6 +28,14 @@ export {
   BULK_HEADER_NAMES,
   type BulkHeaderSignals,
 } from './headers/bulk.js';
+export {
+  assessSpamSignals,
+  isFreemailAddress,
+  DATE_SKEW_SECONDS,
+  SPAM_HEADER_NAMES,
+  type SpamAssessment,
+  type SpamSignalInput,
+} from './rules/header-rules.js';
 export { hasReplyPrefix, isValidMessageId } from './rfc.js';
 export {
   assessSender,
