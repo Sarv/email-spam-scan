@@ -1,0 +1,112 @@
+{
+  "name": "@sarv-in/email-spam-scan",
+  "version": "0.1.0",
+  "description": "Explainable spam and phishing signals for email, computed offline from the message itself. Reads SPF/DKIM/DMARC results, sender-domain spoofing and the true origin IP out of the headers, and returns a score with human-readable reasons.",
+  "license": "MIT",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/Sarv/email-spam-scan.git"
+  },
+  "homepage": "https://github.com/Sarv/email-spam-scan#readme",
+  "bugs": {
+    "url": "https://github.com/Sarv/email-spam-scan/issues"
+  },
+  "type": "module",
+  "files": [
+    "dist",
+    "README.md",
+    "CHANGELOG.md",
+    "LICENSE"
+  ],
+  "exports": {
+    ".": {
+      "import": {
+        "types": "./dist/index.d.ts",
+        "default": "./dist/index.js"
+      },
+      "require": {
+        "types": "./dist/index.d.cts",
+        "default": "./dist/index.cjs"
+      }
+    },
+    "./verdict": {
+      "import": {
+        "types": "./dist/verdict.d.ts",
+        "default": "./dist/verdict.js"
+      },
+      "require": {
+        "types": "./dist/verdict.d.cts",
+        "default": "./dist/verdict.cjs"
+      }
+    },
+    "./identity": {
+      "import": {
+        "types": "./dist/identity.d.ts",
+        "default": "./dist/identity.js"
+      },
+      "require": {
+        "types": "./dist/identity.d.cts",
+        "default": "./dist/identity.cjs"
+      }
+    }
+  },
+  "main": "./dist/index.cjs",
+  "module": "./dist/index.js",
+  "types": "./dist/index.d.ts",
+  "engines": {
+    "node": ">=18"
+  },
+  "publishConfig": {
+    "access": "public"
+  },
+  "packageManager": "pnpm@8.15.0",
+  "scripts": {
+    "build": "tsup",
+    "dev": "tsup --watch",
+    "test": "vitest run",
+    "test:watch": "vitest",
+    "test:coverage": "vitest run --coverage",
+    "type-check": "tsc --noEmit",
+    "lint": "eslint . --max-warnings 0",
+    "lint:fix": "eslint . --fix",
+    "format": "prettier --write .",
+    "format:check": "prettier --check .",
+    "verify": "pnpm run lint && pnpm run format:check && pnpm run type-check && pnpm run test:coverage",
+    "clean": "rm -rf dist",
+    "prepublishOnly": "pnpm run build"
+  },
+  "keywords": [
+    "spam",
+    "spam-filter",
+    "phishing",
+    "email",
+    "email-security",
+    "spf",
+    "dkim",
+    "dmarc",
+    "authentication-results",
+    "imap",
+    "mail",
+    "anti-spam"
+  ],
+  "dependencies": {
+    "ipaddr.js": "^2.2.0",
+    "tldts": "^7.4.10"
+  },
+  "devDependencies": {
+    "@eslint/js": "^10.0.1",
+    "@types/node": "^20.11.0",
+    "@vitest/coverage-v8": "^1.2.0",
+    "eslint": "^10.10.0",
+    "eslint-config-prettier": "^10.1.8",
+    "eslint-import-resolver-typescript": "^4.4.5",
+    "eslint-plugin-import-x": "^4",
+    "eslint-plugin-regexp": "^3.3.0",
+    "globals": "^17.12.0",
+    "prettier": "^3",
+    "tsup": "^8.0.1",
+    "typescript": "^5.3.3",
+    "typescript-eslint": "^8",
+    "vitest": "^1.2.0"
+  }
+}

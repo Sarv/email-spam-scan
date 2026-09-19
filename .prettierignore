@@ -1,0 +1,13 @@
+dist
+coverage
+node_modules
+pnpm-lock.yaml
+
+# Markdown is hand-formatted, deliberately.
+#
+# Prettier pads every table cell out to the widest row, which turns a readable
+# 90-column rule table into a 300-column one that nobody can edit in a diff.
+# The rule tables in the README are the reference documentation; prose style is
+# reviewable by eye, and a broken import is not — which is what the tooling is
+# here for.
+*.md

@@ -1,0 +1,32 @@
+{
+  "compilerOptions": {
+    "target": "ES2021",
+    "lib": ["ES2021", "DOM", "DOM.Iterable"],
+    "module": "ESNext",
+    "moduleResolution": "bundler",
+    "declaration": true,
+    "strict": true,
+    "noUncheckedIndexedAccess": true,
+    "noImplicitOverride": true,
+    "noFallthroughCasesInSwitch": true,
+    "exactOptionalPropertyTypes": false,
+    "esModuleInterop": true,
+    "forceConsistentCasingInFileNames": true,
+    "skipLibCheck": true,
+    "isolatedModules": true,
+    "verbatimModuleSyntax": true,
+    "noEmit": true,
+    "types": ["vitest/globals", "node"],
+    // The examples import the package by its published specifier, exactly as a
+    // consumer's code does — that is the point of them. These map that
+    // specifier back to the source so `tsc` can resolve it in-repo, without the
+    // examples having to import `../../src` and stop being copy-pasteable.
+    "paths": {
+      "@sarv-in/email-spam-scan": ["./src/index.ts"],
+      "@sarv-in/email-spam-scan/verdict": ["./src/verdict.ts"],
+      "@sarv-in/email-spam-scan/identity": ["./src/identity.ts"]
+    }
+  },
+  "include": ["src", "test", "examples"],
+  "exclude": ["dist", "node_modules"]
+}
