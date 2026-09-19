@@ -39,6 +39,43 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   thrown: one bad message in a mailbox of fifty thousand must not end the run.
   The source is consumed lazily and at most `concurrency` messages are held at
   once, so it works on a mailbox larger than memory.
+- **The attachment stage** (`/attachments`, **zero dependencies**) —
+  `assessAttachmentSignals` scores what a file claims to be against what its
+  bytes actually are, with seven new rules: `attachment-name-spoof`,
+  `attachment-double-extension`, `attachment-executable`,
+  `attachment-type-mismatch`, `attachment-macro`,
+  `attachment-archive-executable` and `attachment-encrypted-archive`. The
+  filename and the `Content-Type` are claims the sender wrote; the magic bytes
+  are the only one of the three that cannot be made to say something other than
+  what the reader's software will do, and the disagreement between them is the
+  signal. `scan` runs the stage automatically on the bytes `postal-mime`
+  decoded, so a caller gets it without changing anything.
+- **Nothing is executed, unpacked or inflated.** An archive's central directory
+  is read — names, declared sizes, the encrypted flag — and nothing else. That
+  is a security decision, not an optimisation: a 42 KB zip bomb expands to
+  several petabytes, and a scanner that inflates what it is handed needs a
+  budget, a timeout and a recursion limit to survive being mailed one. It is
+  also why the entry costs nothing: an inflater is the one dependency a scanner
+  handed hostile archives should not carry. The directory walk is bounded at
+  2,000 entries, and a listing that hit the bound says so rather than pretending
+  it saw everything.
+- **`inspectAttachment`, `sniffFileType`, `inspectFilename`, `listZipEntries`,
+  `asBytes`** — the facts the rules scored, exported so a consumer can display
+  them or score them differently. `asBytes` is the one place content is turned
+  into a byte view, which is what keeps a Node `Buffer` — nearly always a window
+  onto a larger shared pool — from being read from the start of the pool rather
+  than the start of the file.
+- **Attachment extension lists as data** — `src/data/attachment-extensions.ts`,
+  with two executable lists rather than one. A `.js` file attached to an email
+  is a dropper; a `.js` file inside a zip is `node_modules`. What counts inside
+  an archive is the narrower set with no innocent reason to be zipped and
+  mailed: Windows binaries, script-host formats, shortcuts and installers.
+- **The stage is not an antivirus and does not claim to be.** No signature
+  database, no emulation; a clean result means "nothing structurally
+  deceptive", never "safe to open". No rule is worth more than 2 points and a
+  bare executable attachment reaches neither threshold on its own — a developer
+  mailing a build to a colleague sends the same bytes as a dropper. It is the
+  combination that files a message.
 - **The body-content stage** (`/content`, `htmlparser2` + `tldts`) —
   `assessContentSignals` scores what the message says with seven new rules:
   `content-spam-vocabulary`, `content-shouting`, `content-hidden-text`,

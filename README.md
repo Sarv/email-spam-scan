@@ -18,12 +18,13 @@ score, a verdict, and a list of named reasons a human can read. No service to
 call, no API key, no model to download. Every rule is a small pure function over
 data you already have.
 
-**Status: the header stage, the body-content stage and `scan(rawMessage)`.**
-Sixteen header rules, the sender-identity check, deceptive-link detection, the
-security-level decision, seven body-content rules and a scanner that takes raw
-RFC 5322 bytes are all here, extracted from a mail client that runs them on real
-mail at ingest. What is not here yet is the attachment stage and live
-SPF/DKIM/DMARC verification — see [Roadmap](#roadmap). What ships today is
+**Status: the header stage, the body-content stage, the attachment stage and
+`scan(rawMessage)`.** Sixteen header rules, the sender-identity check,
+deceptive-link detection, the security-level decision, seven body-content
+rules, seven attachment rules and a scanner that takes raw RFC 5322 bytes are
+all here, extracted from a mail client that runs them on real mail at ingest.
+What is not here yet is live SPF/DKIM/DMARC verification — see
+[Roadmap](#roadmap). What ships today is
 listed under [What it does today](#what-it-does-today), and nothing else is
 implied. This package will not tell you it checked something it did not check.
 
@@ -37,6 +38,7 @@ implied. This package will not tell you it checked something it did not check.
 - [Scoring model](#scoring-model)
 - [The header rules](#the-header-rules)
 - [The content rules](#the-content-rules)
+- [The attachment rules](#the-attachment-rules)
 - [Security levels](#security-levels)
 - [Reading a stored verdict back](#reading-a-stored-verdict-back)
 - [Origin IP: which address actually sent this](#origin-ip-which-address-actually-sent-this)
@@ -64,9 +66,10 @@ Eight, so a browser bundle never has to carry what only a server needs.
 
 | Import | Dependencies | Use it for |
 | --- | --- | --- |
-| `@sarv-in/email-spam-scan` | `tldts`, `ipaddr.js`, `email-addresses`, `htmlparser2`, `postal-mime` | Everything. The Node entry — the scanner, both stages, the header primitives. |
+| `@sarv-in/email-spam-scan` | `tldts`, `ipaddr.js`, `email-addresses`, `htmlparser2`, `postal-mime` | Everything. The Node entry — the scanner, all three stages, the header primitives. |
 | `@sarv-in/email-spam-scan/verdict` | **none** | Reading a stored score/reason back — in a renderer, a worker, anywhere. |
 | `@sarv-in/email-spam-scan/headers` | **none** | Reading raw header text: the lookup, and whether the sender declared itself bulk. |
+| `@sarv-in/email-spam-scan/attachments` | **none** | The attachment stage: filenames, magic bytes, zip directories. Nothing is unpacked, so nothing is needed to unpack it. |
 | `@sarv-in/email-spam-scan/identity` | `tldts` | The sender-spoof rule on its own. |
 | `@sarv-in/email-spam-scan/links` | `tldts`, `htmlparser2` | Deceptive-link detection. |
 | `@sarv-in/email-spam-scan/security` | `tldts`, `htmlparser2` | The five-level decision, for the UI that renders it. |
@@ -267,8 +270,18 @@ extraction the rules saw, exported so you can show a preview or explain why a
 rule fired. `extractHtml` returns the visible text, the quoted text, the text
 the markup hid from the reader, and every anchor with its visible label.
 
+**The attachment stage** (`assessAttachmentSignals`) — seven rules over what a
+file claims to be against what its bytes actually are. Nothing is executed,
+unpacked or inflated: a zip's own directory is read, never its contents. Listed
+in full under [The attachment rules](#the-attachment-rules).
+
+**Attachment primitives** (`inspectAttachment`, `sniffFileType`,
+`inspectFilename`, `listZipEntries`) — the facts the rules scored, exported so
+you can show them or score them differently. Zero dependencies, so a renderer
+can use them too.
+
 **The whole pipeline** (`scan`, `scanMany`) — raw RFC 5322 bytes in, one JSON
-verdict out, both stages included. See
+verdict out, all three stages included. See
 [Scanning a whole message](#scanning-a-whole-message).
 
 **Verdict plumbing** (`spamVerdict`, `isSpamScore`, `parseSpamReasons`,
@@ -377,6 +390,58 @@ Matching is done on NFKC-normalised, lowercased text with zero-width and soft-
 hyphen characters stripped, on whole-word boundaries. So `ＹＯＵ ＨＡＶＥ ＷＯＮ`
 and `you ha<U+200B>ve won` both match, and `wonderful` does not.
 
+## The attachment rules
+
+`assessAttachmentSignals(attachments)` scores what a file claims to be against
+what its bytes actually are. Three sources, and the value is in where they
+disagree: the **name** is a claim the sender wrote that the reader's operating
+system nonetheless acts on, the **MIME type** is a second claim the sender
+wrote, and the **bytes** are the only one of the three that cannot be written
+to say something other than what the software will do.
+
+| Reason id | Points | Fires when |
+| --- | --- | --- |
+| `attachment-name-spoof` | 2 | The filename carries bidirectional override characters, so what is displayed is not what runs |
+| `attachment-double-extension` | 2 | A document extension in front of an executable one — `invoice.pdf.exe` |
+| `attachment-executable` | 2 | The file runs on a double click, by extension or by magic bytes |
+| `attachment-type-mismatch` | 2 | The magic bytes contradict the extension, or the declared `Content-Type` |
+| `attachment-macro` | 2 | A macro-enabled Office extension, or a zip that contains a VBA project whatever it is called |
+| `attachment-archive-executable` | 2 | An archive contains a program — the container is there to get it past the envelope |
+| `attachment-encrypted-archive` | 1 | An archive is password-protected, so nothing between here and the reader can look inside |
+
+**Nothing is executed, unpacked or inflated.** An archive's central directory
+is read — the names, the declared sizes, the encrypted flag — and that is all.
+That is a security decision rather than an optimisation: a 42 KB zip bomb
+expands to several petabytes, and every scanner that inflates what it is handed
+needs a budget, a timeout and a recursion limit to survive being mailed one.
+Reading the directory answers all four of the questions the rules ask and costs
+a bounded walk. It is also why this entry has no dependencies — an inflater is
+the one thing a scanner that is handed hostile archives should not carry.
+
+**Each rule fires once per message.** Ten executables in one archive is one
+decision the sender made, not ten. The reason names the first attachment that
+triggered the rule and counts the others.
+
+**This is not an antivirus, and a clean result does not mean safe to open.**
+There is no signature database and no emulation here; what the stage can see is
+structure. That is why no single rule is worth more than 2 points and why a
+bare executable attachment reaches neither threshold on its own — a developer
+mailing a build to a colleague sends the same bytes as a dropper, and the
+difference is not visible from here. What is visible, and what the stage is
+good at, is the combination that has no innocent version: a file whose name,
+type and contents each say something different.
+
+**It works without the bytes.** A caller that has only the MIME structure — a
+client listing attachments before it has downloaded any — gets the name-based
+rules and nothing else, rather than an error or a false clean.
+
+**The extension lists are data, in this repo, enrichable by pull request.**
+`src/data/attachment-extensions.ts` holds them, and note that there are two
+executable lists rather than one. A `.js` file attached to an email is a
+dropper; a `.js` file inside a zip is `node_modules`. What counts inside an
+archive is the narrower set that has no innocent reason to be zipped up and
+mailed — Windows binaries, script-host formats, shortcuts and installers.
+
 ## Security levels
 
 `assessEmailSecurity` returns one of five, ordered by `LEVEL_RANK`:
@@ -448,9 +513,10 @@ Ordered, and open to contribution — see [CONTRIBUTING.md](./CONTRIBUTING.md).
    structure, scored on the sender's own words rather than the quoted history,
    with the word and domain lists in this repo as data. See
    [The content rules](#the-content-rules).
-2. **Attachment stage.** What is safely knowable without executing anything:
-   dangerous and double extensions, archive contents, macro-bearing Office
-   documents, MIME type that disagrees with the magic bytes.
+2. ~~**Attachment stage.**~~ **Done** — dangerous and double extensions,
+   archive contents, macro-bearing Office documents, and a MIME type that
+   disagrees with the magic bytes. Nothing is executed, unpacked or inflated.
+   See [The attachment rules](#the-attachment-rules).
 3. ~~**Streaming API.**~~ **Done** — `scan(rawMessage)` and `scanMany`,
    returning the JSON verdict per message. See
    [Scanning a whole message](#scanning-a-whole-message).
@@ -503,6 +569,20 @@ Ordered, and open to contribution — see [CONTRIBUTING.md](./CONTRIBUTING.md).
 - `normalizeForMatching(text)`, `containsPhrase(haystack, phrase)`, `collapseWhitespace(text)`
 - `longestShoutRun(text): number`
 - `SPAM_PHRASE_GROUPS`, `VOCABULARY_CAP`
+
+### Attachments — `@sarv-in/email-spam-scan/attachments`
+
+Zero dependencies: nothing here unpacks anything, so there is nothing to unpack
+it with.
+
+- `assessAttachmentSignals(attachments): SpamAssessment` — the whole stage
+- `inspectAttachment(input): AttachmentFacts` — the facts one file yields, unscored
+- `inspectFilename(name): FilenameFacts`, `extensionsOf(name)`, `stripBidiControls(name)`
+- `sniffFileType(content): SniffedType | null` — the family the first bytes belong to
+- `isExecutableType(type)`, `expectedTypesForExtension(ext)`, `expectedTypesForMimeType(type)`
+- `listZipEntries(content): ZipListing | null` — the central directory, never the contents
+- `asBytes(content): Uint8Array | null` — one correct view over every parser's shape
+- `EXECUTABLE_EXTENSIONS`, `ARCHIVE_EXECUTABLE_EXTENSIONS`, `ARCHIVE_EXTENSIONS`, `MACRO_ENABLED_EXTENSIONS`, `DECOY_EXTENSIONS`
 
 ### Security — `@sarv-in/email-spam-scan/security`
 
