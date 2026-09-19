@@ -21,6 +21,7 @@ export default defineConfig({
     // Neither drags in the address parser or the freemail corpus that the
     // header rules need.
     links: 'src/links.ts',
+    security: 'src/security.ts',
   },
   format: ['esm', 'cjs'],
   dts: true,

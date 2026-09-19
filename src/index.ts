@@ -1,11 +1,15 @@
 /**
  * The Node entry point: everything the package exports.
  *
- * Two narrower entries exist for consumers who must not pay for all of it —
- * `@sarv-in/email-spam-scan/verdict` (zero dependencies, for reading a stored
- * score back) and `@sarv-in/email-spam-scan/identity` (`tldts` only, for the
- * sender rule). Both are re-exported here, so a Node consumer needs one
- * import and a browser consumer can still avoid the rest.
+ * Narrower entries exist for consumers who must not pay for all of it:
+ *
+ *   `/verdict`  — zero dependencies, for reading a stored score back.
+ *   `/identity` — `tldts` only, for the sender rule.
+ *   `/links`    — the DOM-dependent link checks.
+ *   `/security` — the level decision, for a UI that displays one.
+ *
+ * All are re-exported here, so a Node consumer needs one import and a browser
+ * consumer can still avoid the address parser and the freemail list.
  */
 export {
   extractOriginIp,
@@ -54,6 +58,20 @@ export {
   type PhishingAssessment,
   type PhishingLevel,
 } from './links.js';
+export {
+  assessEmailSecurity,
+  linkRuleKey,
+  parseAuthStatus,
+  worstLevel,
+  EMPTY_RULES,
+  LEVEL_RANK,
+  type CheckStatus,
+  type LinkRuleSets,
+  type SecurityAssessment,
+  type SecurityCheck,
+  type SecurityInput,
+  type SecurityLevel,
+} from './security.js';
 export {
   isSpamScore,
   parseSpamReasons,

@@ -58,6 +58,16 @@
         "types": "./dist/links.d.cts",
         "default": "./dist/links.cjs"
       }
+    },
+    "./security": {
+      "import": {
+        "types": "./dist/security.d.ts",
+        "default": "./dist/security.js"
+      },
+      "require": {
+        "types": "./dist/security.d.cts",
+        "default": "./dist/security.cjs"
+      }
     }
   },
   "main": "./dist/index.cjs",
