@@ -17,6 +17,18 @@ export {
 } from './headers/origin-ip.js';
 export { extractAuthHeaderBlock, parseAuthenticationHeaders } from './headers/auth-results.js';
 export {
+  headerLookupFromText,
+  headerValueFromText,
+  headerValuesFromText,
+  type HeaderLookup,
+} from './headers/lookup.js';
+export {
+  bulkHeaderSignals,
+  hasBulkHeaderSignal,
+  BULK_HEADER_NAMES,
+  type BulkHeaderSignals,
+} from './headers/bulk.js';
+export {
   assessSender,
   domainOfAddress,
   domainsInText,
@@ -29,8 +41,8 @@ export {
   spamVerdict,
   SPAM_THRESHOLD,
   SUSPICIOUS_THRESHOLD,
+  type AuthStatus,
   type SpamReason,
   type SpamReasonId,
-  type AuthStatus,
   type SpamVerdict,
 } from './verdict.js';
