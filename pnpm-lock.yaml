@@ -5,6 +5,12 @@ settings:
   excludeLinksFromLockfile: false
 
 dependencies:
+  email-addresses:
+    specifier: ^5.0.0
+    version: 5.0.0
+  free-email-domains:
+    specifier: ^1.12.1
+    version: 1.12.2
   ipaddr.js:
     specifier: ^2.2.0
     version: 2.5.0
@@ -40,6 +46,9 @@ devDependencies:
   globals:
     specifier: ^17.12.0
     version: 17.12.0
+  happy-dom:
+    specifier: ^20.14.5
+    version: 20.14.5
   prettier:
     specifier: ^3
     version: 3.9.8
@@ -54,7 +63,7 @@ devDependencies:
     version: 8.70.0(eslint@10.11.0)(typescript@5.9.3)
   vitest:
     specifier: ^1.2.0
-    version: 1.6.1(@types/node@20.19.43)
+    version: 1.6.1(@types/node@20.19.43)(happy-dom@20.14.5)
 
 packages:
 
@@ -983,6 +992,16 @@ packages:
       undici-types: 8.9.0
     dev: true
 
+  /@types/whatwg-mimetype@3.0.2:
+    resolution: {integrity: sha512-c2AKvDT8ToxLIOUlN51gTiHXflsfIFisS4pO7pDPoKouJCESkhZnEy623gwP9laCy5lnLDAw1vAzu2vM2YLOrA==}
+    dev: true
+
+  /@types/ws@8.18.1:
+    resolution: {integrity: sha512-ThVF6DCVhA8kUGy+aazFQ4kXQ7E1Ty7A3ypFOe0IcJV8O/M511G99AW24irKrW56Wt44yG9+ij8FaqoBGkuBXg==}
+    dependencies:
+      '@types/node': 20.19.43
+    dev: true
+
   /@typescript-eslint/eslint-plugin@8.70.0(@typescript-eslint/parser@8.70.0)(eslint@10.11.0)(typescript@5.9.3):
     resolution: {integrity: sha512-/v8HZt6RlyIZxB3ntehELOcUcfxKPVGWXnQdJuHRmzrqgF8nQypcC/oxGW+Ot4VGKDq81XugPKxx0n5PBtf9PA==}
     engines: {node: ^18.18.0 || ^20.9.0 || >=21.1.0}
@@ -1321,7 +1340,7 @@ packages:
       std-env: 3.10.0
       strip-literal: 2.1.1
       test-exclude: 6.0.0
-      vitest: 1.6.1(@types/node@20.19.43)
+      vitest: 1.6.1(@types/node@20.19.43)(happy-dom@20.14.5)
     transitivePeerDependencies:
       - supports-color
     dev: true
@@ -1429,6 +1448,13 @@ packages:
     engines: {node: 20 || >=22}
     dependencies:
       balanced-match: 4.0.4
+    dev: true
+
+  /buffer-image-size@0.6.4:
+    resolution: {integrity: sha512-nEh+kZOPY1w+gcCMobZ6ETUp9WfibndnosbpwB1iJk/8Gt5ZF2bhS6+B6bPYz424KtwsR6Rflc3tCz1/ghX2dQ==}
+    engines: {node: '>=4.0'}
+    dependencies:
+      '@types/node': 20.19.43
     dev: true
 
   /bundle-require@5.1.0(esbuild@0.27.7):
@@ -1540,6 +1566,15 @@ packages:
   /diff-sequences@29.6.3:
     resolution: {integrity: sha512-EjePK1srD3P08o2j4f0ExnylqRs5B9tJjcp9t1krH2qRi8CCdsYfwe9JgSLurFBWwq4uOlipzfk5fHNvwFKr8Q==}
     engines: {node: ^14.15.0 || ^16.10.0 || >=18.0.0}
+    dev: true
+
+  /email-addresses@5.0.0:
+    resolution: {integrity: sha512-4OIPYlA6JXqtVn8zpHpGiI7vE6EQOAg16aGnDMIAlZVinnoZ8208tW1hAbjWydgN/4PLTT9q+O1K6AH/vALJGw==}
+    dev: false
+
+  /entities@7.0.1:
+    resolution: {integrity: sha512-TWrgLOFUQTH994YUyl1yT4uyavY5nNB5muff+RtWaqNVCAK408b5ZnnbNAUEWLTCpum9w6arT70i1XdQ4UeOPA==}
+    engines: {node: '>=0.12'}
     dev: true
 
   /esbuild@0.21.5:
@@ -1880,6 +1915,12 @@ packages:
     resolution: {integrity: sha512-5+ybhBZANEJxaH3X5evAFatUxLfEHSr7n6kYJ+1Qd0mUqr4eu9gIf6GDbWHf8RJijHrjjO8G+la14SlL2SeS1Q==}
     dev: true
 
+  /free-email-domains@1.12.2:
+    resolution: {integrity: sha512-W9GAl8DyvETNQgbIal4YgwjUeNHuzGAk/S+BJ3sP0tzTEapy8F6wabe9dB/P6sgS1fVgwroBsjorZNocxACO2A==}
+    engines: {node: '>= 18'}
+    requiresBuild: true
+    dev: false
+
   /fs.realpath@1.0.0:
     resolution: {integrity: sha512-OO0pH2lK6a0hZnAdau5ItzHPI6pUlvI7jMVnxUQRtw4owF2wk8lOSabtGDCTP4Ggrg2MbGnWO9X8K1t4+fGMDw==}
     dev: true
@@ -1929,6 +1970,22 @@ packages:
   /globals@17.12.0:
     resolution: {integrity: sha512-cezEd/DTyyht9cvSSURyygXPfy04GtWO/5e6ZPvH7fCtjKz9PYOmuawphw1Ctd1f6C+5JypXfGD7ahNMXvevBA==}
     engines: {node: '>=18'}
+    dev: true
+
+  /happy-dom@20.14.5:
+    resolution: {integrity: sha512-x/RzkpWO40bTjIoT30iQtt64FLLmH/iRcUCN2X//bLx7H3ifkdfPXyqsro/OYtqzIAhiLMMA7mmiOR9C3NOKjQ==}
+    engines: {node: '>=20.0.0'}
+    dependencies:
+      '@types/node': 20.19.43
+      '@types/whatwg-mimetype': 3.0.2
+      '@types/ws': 8.18.1
+      buffer-image-size: 0.6.4
+      entities: 7.0.1
+      whatwg-mimetype: 3.0.0
+      ws: 8.21.3
+    transitivePeerDependencies:
+      - bufferutil
+      - utf-8-validate
     dev: true
 
   /has-flag@4.0.0:
@@ -2811,7 +2868,7 @@ packages:
       fsevents: 2.3.3
     dev: true
 
-  /vitest@1.6.1(@types/node@20.19.43):
+  /vitest@1.6.1(@types/node@20.19.43)(happy-dom@20.14.5):
     resolution: {integrity: sha512-Ljb1cnSJSivGN0LqXd/zmDbWEM0RNNg2t1QW/XUhYl/qPqyu7CsqeWtqQXHVaJsecLPuDoak2oJcZN2QoRIOag==}
     engines: {node: ^18.0.0 || >=20.0.0}
     hasBin: true
@@ -2846,6 +2903,7 @@ packages:
       chai: 4.5.0
       debug: 4.4.3
       execa: 8.0.1
+      happy-dom: 20.14.5
       local-pkg: 0.5.1
       magic-string: 0.30.21
       pathe: 1.1.2
@@ -2866,6 +2924,11 @@ packages:
       - sugarss
       - supports-color
       - terser
+    dev: true
+
+  /whatwg-mimetype@3.0.0:
+    resolution: {integrity: sha512-nt+N2dzIutVRxARx1nghPKGv1xHikU7HKdfafKkLNLindmPU/ch3U31NOCGGA/dmPcmb1VlofO0vnKAcsm0o/Q==}
+    engines: {node: '>=12'}
     dev: true
 
   /which@2.0.2:
@@ -2892,6 +2955,19 @@ packages:
 
   /wrappy@1.0.2:
     resolution: {integrity: sha512-l4Sp/DRseor9wL6EvV2+TuQn63dMkPjZ/sp9XkghTEbV9KlPS1xUsZ3u7/IQO4wxtcFB4bgpQPRcR3QCvezPcQ==}
+    dev: true
+
+  /ws@8.21.3:
+    resolution: {integrity: sha512-201TZ/kPWxoPr/OKWjquZR1SWKXcvxdH+e1xrx89b3YbmzLMFCLfnaG1HFIgWzJOEWZ7MvpK++odZufgYR50Rw==}
+    engines: {node: '>=10.0.0'}
+    peerDependencies:
+      bufferutil: ^4.0.1
+      utf-8-validate: '>=5.0.2'
+    peerDependenciesMeta:
+      bufferutil:
+        optional: true
+      utf-8-validate:
+        optional: true
     dev: true
 
   /yocto-queue@0.1.0:
