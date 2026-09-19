@@ -28,6 +28,7 @@ export {
   BULK_HEADER_NAMES,
   type BulkHeaderSignals,
 } from './headers/bulk.js';
+export { hasReplyPrefix, isValidMessageId } from './rfc.js';
 export {
   assessSender,
   domainOfAddress,
