@@ -48,6 +48,16 @@
         "types": "./dist/identity.d.cts",
         "default": "./dist/identity.cjs"
       }
+    },
+    "./links": {
+      "import": {
+        "types": "./dist/links.d.ts",
+        "default": "./dist/links.js"
+      },
+      "require": {
+        "types": "./dist/links.d.cts",
+        "default": "./dist/links.cjs"
+      }
     }
   },
   "main": "./dist/index.cjs",

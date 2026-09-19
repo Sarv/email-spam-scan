@@ -45,6 +45,16 @@ export {
   type PhishingReason,
 } from './identity.js';
 export {
+  assessLinks,
+  assessPhishing,
+  linkDomainsAllMatch,
+  linkMismatches,
+  LINK_WRAPPER_DOMAINS,
+  type LinkMismatch,
+  type PhishingAssessment,
+  type PhishingLevel,
+} from './links.js';
+export {
   isSpamScore,
   parseSpamReasons,
   spamVerdict,

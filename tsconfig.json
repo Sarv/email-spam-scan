@@ -24,7 +24,8 @@
     "paths": {
       "@sarv-in/email-spam-scan": ["./src/index.ts"],
       "@sarv-in/email-spam-scan/verdict": ["./src/verdict.ts"],
-      "@sarv-in/email-spam-scan/identity": ["./src/identity.ts"]
+      "@sarv-in/email-spam-scan/identity": ["./src/identity.ts"],
+      "@sarv-in/email-spam-scan/links": ["./src/links.ts"]
     }
   },
   "include": ["src", "test", "examples"],

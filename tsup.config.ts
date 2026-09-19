@@ -16,6 +16,11 @@ export default defineConfig({
     // `verdict` is zero-dependency by contract; `identity` costs `tldts` only.
     verdict: 'src/verdict.ts',
     identity: 'src/identity.ts',
+    // `links` and `security` are the renderer's pair: the DOM-dependent link
+    // checks, and the level decision that a shield or a banner displays.
+    // Neither drags in the address parser or the freemail corpus that the
+    // header rules need.
+    links: 'src/links.ts',
   },
   format: ['esm', 'cjs'],
   dts: true,
