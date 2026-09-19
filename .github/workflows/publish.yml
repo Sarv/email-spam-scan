@@ -1,0 +1,106 @@
+# Publish to npm when a version tag is pushed.
+#
+# THE TAG IS THE SOURCE OF TRUTH. Pushing `v0.1.0` publishes 0.1.0 — the version
+# is written into package.json here, in CI, so releasing is one command and
+# there is no second place to keep in sync:
+#
+#   git tag v0.1.0 && git push --tags
+#
+# `npm version` locally still works and is still fine (it writes package.json
+# and the matching tag together); this just stops a forgotten bump from being
+# the thing that fails a release.
+name: Publish
+
+on:
+  push:
+    tags:
+      - 'v*'
+
+permissions:
+  # `id-token: write` mints the OIDC token, and it now does two jobs: npm
+  # exchanges it for the short-lived credential that AUTHORIZES the publish
+  # (trusted publishing — there is no npm token in this workflow), and it backs
+  # the provenance attestation, the signed record of which workflow, which
+  # commit and which repo produced the tarball. Without it both fail.
+  contents: read
+  id-token: write
+
+jobs:
+  publish:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      # Reads the pnpm version from `packageManager` in package.json, so CI runs
+      # the same pnpm that produced the lockfile. A newer major would reject the
+      # lockfile format under --frozen-lockfile.
+      - uses: pnpm/action-setup@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: pnpm
+          # Points npm at the public registry, which is also where the OIDC
+          # exchange happens. No token is written — see the publish step.
+          registry-url: 'https://registry.npmjs.org'
+
+      # Node 22 bundles npm 10, and trusted publishing needs npm >= 11.5.1: it
+      # is the version that knows how to exchange the Actions OIDC token for a
+      # short-lived publish credential. On npm 10 the publish falls back to
+      # looking for a token, finds none, and fails with a 401 that says nothing
+      # about OIDC.
+      - name: Use an npm that can do trusted publishing
+        run: npm install -g npm@latest
+
+      - run: pnpm install --frozen-lockfile
+
+      - name: Take the version from the tag
+        run: |
+          set -euo pipefail
+          version="${GITHUB_REF_NAME#v}"
+
+          # Reject a tag npm could not publish anyway — `v2.0` or `vfinal` would
+          # otherwise fail three minutes later, after the whole suite has run.
+          if ! printf '%s' "$version" | grep -Eq '^[0-9]+\.[0-9]+\.[0-9]+(-[0-9A-Za-z.-]+)?(\+[0-9A-Za-z.-]+)?$'; then
+            echo "::error::tag ${GITHUB_REF_NAME} is not a semver version"
+            exit 1
+          fi
+
+          pkg_version="$(node -p "require('./package.json').version")"
+          if [ "$version" != "$pkg_version" ]; then
+            echo "::warning::package.json says ${pkg_version}; publishing ${version} from the tag"
+          fi
+
+          # --no-git-tag-version: write the file only. No commit, no second tag,
+          # and no clean-worktree requirement. --allow-same-version so the
+          # ordinary case (package.json already bumped) is not an error.
+          npm version "$version" --no-git-tag-version --allow-same-version
+          echo "OK: publishing ${version}"
+
+      # The whole pipeline before anything leaves the building. A published
+      # version cannot be un-published after 72 hours, and cannot be re-published
+      # at the same number ever — so this gate runs on the tag, not on trust.
+      - run: pnpm type-check
+      # Coverage, matching ci.yml: the 100% thresholds in vitest.config.ts only
+      # fail the build when the coverage reporter runs, so a plain `pnpm test`
+      # here would make the RELEASE gate weaker than the merge gate — the one
+      # place that must never be true, since a published version cannot be
+      # unpublished after 72 hours.
+      - run: pnpm test:coverage
+      - run: pnpm build
+
+      # No NODE_AUTH_TOKEN, on purpose. This repo is a TRUSTED PUBLISHER on npm
+      # (npmjs.com -> package -> Access), so npm swaps the `id-token: write`
+      # OIDC token above for a credential that lives for the length of this one
+      # publish. Nothing long-lived is stored anywhere, and a leaked secret is
+      # not a thing that can happen to a secret that does not exist.
+      #
+      # Setting NODE_AUTH_TOKEN here would UNDO that: npm takes the token path
+      # whenever a token is present and never attempts the exchange — and an
+      # empty `secrets.NPM_TOKEN` fails the publish outright.
+      #
+      # Provenance is still explicit. Trusted publishing attests it by default,
+      # but the flag is what keeps this working if the publisher is ever
+      # removed and the workflow goes back to a token.
+      - name: Publish
+        run: npm publish --provenance --access public

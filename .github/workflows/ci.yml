@@ -1,0 +1,67 @@
+# Type-check, test and build on every push and pull request.
+#
+# The publish workflow runs the same steps, but only on a tag — which is far
+# too late to learn that main is broken. This is the one that has to be green
+# before a release is ever cut.
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+permissions:
+  contents: read
+
+jobs:
+  # Style and static analysis. One job, one platform, one Node version — the
+  # answer cannot differ across the matrix, and running it twelve times would
+  # only cost twelve times as long to tell a contributor the same thing.
+  lint:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: pnpm/action-setup@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: pnpm
+      - run: pnpm install --frozen-lockfile
+      # `--max-warnings 0`, unlike the sibling package: this repo starts with
+      # no ReDoS backlog to grandfather, so there is nothing to permit.
+      - run: pnpm lint
+      - run: pnpm format:check
+
+  test:
+    runs-on: ${{ matrix.os }}
+    strategy:
+      fail-fast: false
+      matrix:
+        # All three platforms: a scanner reads mail on whatever the consumer
+        # runs, and line-ending handling in a raw header block is exactly the
+        # kind of thing that passes on Linux and fails on Windows.
+        os: [ubuntu-latest, macos-latest, windows-latest]
+        # 24 as well as 18/20/22, and that is not padding. Node 22 and Node 24
+        # disagree about WHEN a rejected stream write surfaces: on 24 it throws
+        # inside `pipe()` and becomes a promise rejection the caller can catch,
+        # on 22 it arrives a tick later as an uncaught exception no caller can
+        # catch. Sarv Inbox lost a red main to precisely that (Inbox 1197882,
+        # `readRawMimeParts`) — every test passed and the suite still failed.
+        # This package will stream MIME for the attachment stage, so both sides
+        # of that divergence have to be in the matrix from the start.
+        node-version: [18, 20, 22, 24]
+    steps:
+      - uses: actions/checkout@v4
+      - uses: pnpm/action-setup@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: ${{ matrix.node-version }}
+          cache: pnpm
+      - run: pnpm install --frozen-lockfile
+      - run: pnpm type-check
+      # Coverage rather than a plain test run: the thresholds in
+      # vitest.config.ts are 100% and they only fail the build when the
+      # coverage reporter actually runs. A rule that can file somebody's
+      # invoice as spam must not reach main with an untested branch.
+      - run: pnpm test:coverage
+      - run: pnpm build
