@@ -2,19 +2,24 @@
  * Deceptive links — an anchor whose visible text names one domain while the
  * href goes somewhere else entirely.
  *
- * Needs a DOM parser, so this is the one module in the package that is not
- * pure computation over strings. It uses the global `DOMParser`: present in a
- * browser and in Electron's renderer, absent in plain Node unless a caller
- * supplies one (`happy-dom`, `jsdom`, or Node's own `--experimental` builds).
- * When it is absent, every function here degrades to "found nothing" rather
- * than throwing — a scanner that cannot inspect links must not claim links are
- * bad, and must not take the whole scan down either.
- *
  * Domain comparison is on the registrable domain (eTLD+1), so
  * `mail.paypal.com` vs `paypal.com` is NOT flagged while `paypal.com` vs
  * `paypal.secure-login.ru` is.
+ *
+ * HTML is read with `htmlparser2` rather than the ambient `DOMParser`. Until
+ * v0.2 this module used the browser's parser and returned "found nothing"
+ * wherever there was not one — which meant a scan running in Node, where mail
+ * is actually scored, silently reported that a phishing body contained no
+ * deceptive links. The verdict depended on which process happened to compute
+ * it, and the two never met to disagree out loud. One parser that works
+ * everywhere is the only version of this check that can be trusted.
  */
-import { assessSender, domainsInText, registrableDomain, type PhishingReason } from './identity.js';
+import { extractHtml } from './content/html-text.js';
+import { assessSender, type PhishingReason } from './identity.js';
+import { anchorMismatches, linkTarget, LINK_WRAPPER_DOMAINS, type LinkMismatch } from './urls.js';
+
+export type { LinkMismatch };
+export { LINK_WRAPPER_DOMAINS };
 
 export type PhishingLevel = 'none' | 'caution' | 'danger';
 
@@ -23,111 +28,20 @@ export interface PhishingAssessment {
   reasons: PhishingReason[];
 }
 
-/** One deceptive link: the domain the text shows vs the domain the href goes to. */
-export interface LinkMismatch {
-  shown: string;
-  actual: string;
-}
-
-/**
- * Common ESP / link-tracker / URL-shortener registrable domains. Legitimate
- * marketing mail routinely wraps links through these, so a "text says
- * brand.com, href is <esp>" mismatch there is expected, not deceptive — skip
- * them to keep the signal meaningful, because a warning that fires on ordinary
- * newsletters is a warning people learn to click past.
- *
- * Contributions: add a host that exists to COUNT a click and redirect. Do not
- * add a host merely because one sender abused it — these carry ordinary mail
- * too, and blocking the carrier punishes everyone who uses it.
- */
-export const LINK_WRAPPER_DOMAINS: ReadonlySet<string> = new Set<string>([
-  'amazonses.com',
-  'bit.ly',
-  'cmail19.com',
-  'cmail20.com',
-  'createsend.com',
-  'doubleclick.net',
-  'exct.net',
-  'goo.gl',
-  'google.com',
-  'hs-sending.com',
-  'hubs.ly',
-  'hubspot.com',
-  'hubspotlinks.com',
-  'list-manage.com',
-  'lnkd.in',
-  'mailchimp.com',
-  'mailgun.org',
-  'mandrillapp.com',
-  'marketo.com',
-  'ow.ly',
-  'pardot.com',
-  'rs6.net',
-  'safelinks.protection.outlook.com',
-  'salesforce.com',
-  'sendgrid.net',
-  'sendible.com',
-  'sparkpostmail.com',
-  't.co',
-  'tinyurl.com',
-]);
-
-/** Parse HTML with the ambient DOMParser, or null when there is none / it fails. */
-function parseHtml(html: string | null | undefined): Document | null {
-  if (!html || typeof DOMParser === 'undefined') return null;
-  try {
-    return new DOMParser().parseFromString(html, 'text/html');
-  } catch {
-    return null;
-  }
-}
-
-/**
- * The `href` of an anchor that the `a[href]` selector matched. The cast is
- * honest where the `|| ''` it replaces was not: the selector already required
- * the attribute, so the fallback was a branch no message could reach, and a
- * coverage gate cannot be met by a test that cannot be written.
- */
-function hrefOf(anchor: Element): string {
-  return anchor.getAttribute('href') as string;
-}
-
-/** The registrable domain an href resolves to, or null when it is not http(s). */
-function hrefDomain(href: string): string | null {
-  if (!/^https?:\/\//i.test(href)) return null;
-  try {
-    return registrableDomain(new URL(href).hostname);
-  } catch {
-    return null;
-  }
-}
-
 /**
  * Every anchor whose visible text names one registrable domain while its href
  * goes to another — the structured form, so callers can act on the PAIR (trust
  * it, block it, list it) rather than only render a sentence about it.
- * De-duplicated, and capped at three: the fourth example of the same trick
- * persuades nobody who was not already persuaded by the first.
+ * De-duplicated, and capped at three.
+ *
+ * Quoted history is included. This function answers "what is in this document"
+ * for a reader looking at it, and a deceptive link is worth pointing at
+ * wherever in the thread it sits. The body-content SCORER takes the narrower
+ * view — see `bodyContent` — because charging the forwarder points for the
+ * phish they forwarded is a different mistake.
  */
 export function linkMismatches(html: string | null | undefined): LinkMismatch[] {
-  const doc = parseHtml(html);
-  if (!doc) return [];
-  const seen = new Set<string>();
-  const out: LinkMismatch[] = [];
-  for (const anchor of Array.from(doc.querySelectorAll('a[href]'))) {
-    if (out.length >= 3) break;
-    const actual = hrefDomain(hrefOf(anchor));
-    if (!actual || LINK_WRAPPER_DOMAINS.has(actual)) continue;
-    for (const shown of domainsInText(anchor.textContent)) {
-      if (shown === actual || LINK_WRAPPER_DOMAINS.has(shown)) continue;
-      const key = `${shown}->${actual}`;
-      if (seen.has(key)) continue;
-      seen.add(key);
-      out.push({ shown, actual });
-      break;
-    }
-  }
-  return out;
+  return anchorMismatches(extractHtml(html).anchors);
 }
 
 /** {@link linkMismatches}, phrased for a human. */
@@ -142,9 +56,8 @@ export function assessLinks(html: string | null | undefined): PhishingReason[] {
  * True when every http(s) link in the body resolves to the sender's own
  * registrable domain. Absence of links counts as true — nothing points away.
  *
- * Returns false when there is HTML with links but no parser to read it: the
- * claim being made is "everything here stays home", and that cannot be
- * asserted on evidence nobody looked at.
+ * Returns false when the sender's domain is unknown: the claim being made is
+ * "everything here stays home", and there is no home to compare against.
  */
 export function linkDomainsAllMatch(
   html: string | null | undefined,
@@ -152,13 +65,11 @@ export function linkDomainsAllMatch(
 ): boolean {
   if (!html) return true;
   if (!senderDomain) return false;
-  const doc = parseHtml(html);
-  if (!doc) return false;
-  for (const anchor of Array.from(doc.querySelectorAll('a[href]'))) {
-    const href = hrefOf(anchor);
-    if (!/^https?:\/\//i.test(href)) continue;
-    const domain = hrefDomain(href);
-    if (domain !== senderDomain) return false;
+  for (const anchor of extractHtml(html).anchors) {
+    const target = linkTarget(anchor.href);
+    // Non-http(s) hrefs — `mailto:`, `#top`, `cid:` — are not places to be
+    // sent, so they cannot point away from home.
+    if (target && target.domain !== senderDomain) return false;
   }
   return true;
 }

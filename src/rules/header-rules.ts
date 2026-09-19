@@ -23,16 +23,16 @@
  * alongside this score. Their points add to these; they do not replace them.
  */
 import emailAddresses from 'email-addresses';
-import freeEmailDomains from 'free-email-domains';
 
+import { FREEMAIL_DOMAINS } from '../data/freemail-domains.js';
 import { bulkHeaderSignals } from '../headers/bulk.js';
 import type { HeaderLookup } from '../headers/lookup.js';
 import { assessSender, domainOfAddress } from '../identity.js';
 import { hasReplyPrefix, isValidMessageId } from '../rfc.js';
 import {
-  SPAM_THRESHOLD,
-  SUSPICIOUS_THRESHOLD,
+  assessmentOf,
   type AuthStatus,
+  type SpamAssessment,
   type SpamReason,
   type SpamReasonId,
 } from '../verdict.js';
@@ -79,16 +79,7 @@ export interface SpamSignalInput {
   knownSpammer?: boolean;
 }
 
-export interface SpamAssessment {
-  score: number;
-  reasons: SpamReason[];
-  /** score >= SPAM_THRESHOLD */
-  isSpam: boolean;
-  /** score >= SUSPICIOUS_THRESHOLD */
-  suspicious: boolean;
-}
-
-const FREEMAIL = new Set<string>(freeEmailDomains);
+const FREEMAIL = new Set<string>(FREEMAIL_DOMAINS);
 
 /** Is this a consumer webmail address (gmail, yahoo, outlook, ...)? */
 export function isFreemailAddress(address: string | null | undefined): boolean {
@@ -246,11 +237,5 @@ export function assessSpamSignals(input: SpamSignalInput): SpamAssessment {
     }
   }
 
-  const score = reasons.reduce((sum, r) => sum + r.points, 0);
-  return {
-    score,
-    reasons,
-    isSpam: score >= SPAM_THRESHOLD,
-    suspicious: score >= SUSPICIOUS_THRESHOLD,
-  };
+  return assessmentOf(reasons);
 }

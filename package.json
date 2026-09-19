@@ -49,6 +49,16 @@
         "default": "./dist/identity.cjs"
       }
     },
+    "./headers": {
+      "import": {
+        "types": "./dist/headers.d.ts",
+        "default": "./dist/headers.js"
+      },
+      "require": {
+        "types": "./dist/headers.d.cts",
+        "default": "./dist/headers.cjs"
+      }
+    },
     "./links": {
       "import": {
         "types": "./dist/links.d.ts",
@@ -67,6 +77,26 @@
       "require": {
         "types": "./dist/security.d.cts",
         "default": "./dist/security.cjs"
+      }
+    },
+    "./content": {
+      "import": {
+        "types": "./dist/content.d.ts",
+        "default": "./dist/content.js"
+      },
+      "require": {
+        "types": "./dist/content.d.cts",
+        "default": "./dist/content.cjs"
+      }
+    },
+    "./scan": {
+      "import": {
+        "types": "./dist/scan.d.ts",
+        "default": "./dist/scan.js"
+      },
+      "require": {
+        "types": "./dist/scan.d.cts",
+        "default": "./dist/scan.cjs"
       }
     }
   },
@@ -111,8 +141,9 @@
   ],
   "dependencies": {
     "email-addresses": "^5.0.0",
-    "free-email-domains": "^1.12.1",
+    "htmlparser2": "^10.1.0",
     "ipaddr.js": "^2.2.0",
+    "postal-mime": "^3.0.0",
     "tldts": "^7.4.10"
   },
   "devDependencies": {
@@ -125,7 +156,6 @@
     "eslint-plugin-import-x": "^4",
     "eslint-plugin-regexp": "^3.3.0",
     "globals": "^17.12.0",
-    "happy-dom": "^20.14.5",
     "prettier": "^3",
     "tsup": "^8.0.1",
     "typescript": "^5.3.3",

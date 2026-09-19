@@ -43,7 +43,18 @@ export type SpamReasonId =
   | 'fake-reply'
   | 'no-recipient'
   | 'bulk-no-unsubscribe'
-  | 'precedence-junk';
+  | 'precedence-junk'
+  // The body-content stage. Scored on the sender's OWN words — quoted history
+  // and signature removed first — so a reply that quotes a phish is not itself
+  // scored as one, and a long thread does not accumulate points every time
+  // somebody hits reply.
+  | 'content-spam-vocabulary'
+  | 'content-shouting'
+  | 'content-hidden-text'
+  | 'link-display-mismatch'
+  | 'link-bare-ip'
+  | 'link-userinfo'
+  | 'link-punycode';
 
 export interface SpamReason {
   id: SpamReasonId;
@@ -73,6 +84,59 @@ export interface AuthStatus {
   dmarc: 'pass' | 'fail' | 'none' | 'unknown';
   /** Rolled up across the three. `fail` if ANY component failed. */
   overall: 'pass' | 'partial' | 'fail' | 'none';
+}
+
+/**
+ * What one stage of the scanner concluded: the points it charged, and why.
+ *
+ * It lives HERE, with the thresholds, rather than beside the header rules that
+ * were the first to produce one. Every stage returns this same shape — headers
+ * today, body content and attachments next — and a stage must be able to
+ * return it without importing the stage before it. Put this type in the header
+ * rules and the content rules inherit an address parser and a fourteen-thousand
+ * entry domain corpus to describe a result, which is precisely the accidental
+ * cost the entry-point split exists to prevent.
+ */
+export interface SpamAssessment {
+  score: number;
+  reasons: SpamReason[];
+  /** score >= SPAM_THRESHOLD */
+  isSpam: boolean;
+  /** score >= SUSPICIOUS_THRESHOLD */
+  suspicious: boolean;
+}
+
+/**
+ * Sum a stage's reasons into an assessment.
+ *
+ * The one place the total is computed, so no stage can invent its own
+ * arithmetic or its own idea of where the thresholds sit.
+ */
+export function assessmentOf(reasons: SpamReason[]): SpamAssessment {
+  const score = reasons.reduce((sum, reason) => sum + reason.points, 0);
+  return {
+    score,
+    reasons,
+    isSpam: score >= SPAM_THRESHOLD,
+    suspicious: score >= SUSPICIOUS_THRESHOLD,
+  };
+}
+
+/**
+ * Add several stages' assessments together into the one verdict a caller acts
+ * on. Nullish parts are skipped, so a caller can pass a stage that did not run
+ * — no body downloaded yet, own mail that is never content-scored — without
+ * branching at the call site.
+ *
+ * Additive, because that is the whole scoring model: the stages are evidence
+ * about the same message and no stage overrides another. Reasons keep the
+ * order they were passed in, so the header rules read before the body rules in
+ * whatever the user is shown.
+ */
+export function mergeAssessments(
+  ...parts: readonly (SpamAssessment | null | undefined)[]
+): SpamAssessment {
+  return assessmentOf(parts.flatMap((part) => part?.reasons ?? []));
 }
 
 export type SpamVerdict = 'spam' | 'suspicious' | 'clean';

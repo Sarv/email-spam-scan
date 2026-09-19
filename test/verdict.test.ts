@@ -1,7 +1,9 @@
 import { describe, expect, it } from 'vitest';
 
 import {
+  assessmentOf,
   isSpamScore,
+  mergeAssessments,
   parseSpamReasons,
   spamVerdict,
   SPAM_THRESHOLD,
@@ -88,5 +90,83 @@ describe('parseSpamReasons', () => {
       { id: 'fake-reply', points: 2, detail: 42 },
     ]);
     expect(parseSpamReasons(json)).toEqual([reason]);
+  });
+});
+
+/**
+ * The two helpers every stage returns through. They exist so that a caller
+ * combining the header stage with the body stage never adds numbers by hand —
+ * the moment two call sites each compute `isSpam` for themselves, they start
+ * disagreeing about the same message.
+ */
+describe('assessmentOf', () => {
+  const reasonWorth = (points: number): SpamReason => ({ id: 'date-skew', points, detail: 'x' });
+
+  it('sums the reasons and answers both thresholds', () => {
+    const assessment = assessmentOf([reasonWorth(2), reasonWorth(1)]);
+    expect(assessment.score).toBe(3);
+    expect(assessment.reasons).toHaveLength(2);
+    expect(assessment.suspicious).toBe(true);
+    expect(assessment.isSpam).toBe(false);
+  });
+
+  it('is clean and not suspicious with no reasons at all', () => {
+    expect(assessmentOf([])).toEqual({ score: 0, reasons: [], isSpam: false, suspicious: false });
+  });
+
+  // Regression: the thresholds are inclusive. An off-by-one here is a message
+  // scoring exactly 5 that never gets filed, which looks like the rule that
+  // scored it simply not working.
+  it('treats each threshold as a floor, not a bound to exceed', () => {
+    expect(assessmentOf([reasonWorth(SUSPICIOUS_THRESHOLD)]).suspicious).toBe(true);
+    expect(assessmentOf([reasonWorth(SUSPICIOUS_THRESHOLD - 1)]).suspicious).toBe(false);
+    expect(assessmentOf([reasonWorth(SPAM_THRESHOLD)]).isSpam).toBe(true);
+    expect(assessmentOf([reasonWorth(SPAM_THRESHOLD - 1)]).isSpam).toBe(false);
+  });
+
+  // Regression: spam is a superset of suspicious. A message reported as spam
+  // but not suspicious would render as two contradictory badges at once.
+  it('never reports spam without also reporting suspicious', () => {
+    expect(assessmentOf([reasonWorth(SPAM_THRESHOLD)]).suspicious).toBe(true);
+  });
+});
+
+describe('mergeAssessments', () => {
+  const stage = (points: number): SpamReason => ({ id: 'auth-failed', points, detail: 'x' });
+
+  // Regression: this is the whole point of the seam. Two stages that each fall
+  // short of the threshold can only file a message together if their reasons
+  // are concatenated and re-totalled, not if their booleans are OR-ed.
+  it('adds the stages up, so two partial cases can make a whole one', () => {
+    const headers = assessmentOf([stage(3)]);
+    const content = assessmentOf([stage(2)]);
+    expect(headers.isSpam).toBe(false);
+    expect(content.isSpam).toBe(false);
+    const merged = mergeAssessments(headers, content);
+    expect(merged.score).toBe(5);
+    expect(merged.reasons).toHaveLength(2);
+    expect(merged.isSpam).toBe(true);
+  });
+
+  // Regression: `null` is what a stage returns when it did not judge the
+  // message at all — own mail is never spam-scored. Skipping a stage must not
+  // throw, and must not be confused with that stage finding nothing.
+  it('skips stages that did not run, and merges nothing into a clean verdict', () => {
+    expect(mergeAssessments(null, undefined, assessmentOf([stage(2)])).score).toBe(2);
+    expect(mergeAssessments()).toEqual({ score: 0, reasons: [], isSpam: false, suspicious: false });
+    expect(mergeAssessments(null, undefined)).toEqual({
+      score: 0,
+      reasons: [],
+      isSpam: false,
+      suspicious: false,
+    });
+  });
+
+  it('keeps the reasons in stage order, so the explanation reads top-down', () => {
+    const merged = mergeAssessments(
+      assessmentOf([{ id: 'auth-failed', points: 1, detail: 'first' }]),
+      assessmentOf([{ id: 'content-shouting', points: 1, detail: 'second' }]),
+    );
+    expect(merged.reasons.map((reason) => reason.detail)).toEqual(['first', 'second']);
   });
 });
