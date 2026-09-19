@@ -21,8 +21,14 @@ export default defineConfig({
     // message declared itself bulk must not have to import the scanner — the
     // header rules cost an address parser and a freemail corpus.
     headers: 'src/headers/index.ts',
-    // `links` and `security` are the renderer's pair: the DOM-dependent link
-    // checks, and the level decision that a shield or a banner displays.
+    // `attachments` is the third zero-dependency entry, and the one a client
+    // is most likely to want alone: a signature table, a filename reader and
+    // a zip-directory walk, none of which needs a package. A renderer
+    // deciding whether to warn on a paperclip gets the scanner's own answer
+    // without the scanner.
+    attachments: 'src/attachments/index.ts',
+    // `links` and `security` are the renderer's pair: the link checks, and
+    // the level decision that a shield or a banner displays.
     // Neither drags in the address parser or the freemail corpus that the
     // header rules need.
     links: 'src/links.ts',

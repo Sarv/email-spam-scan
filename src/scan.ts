@@ -16,12 +16,14 @@
  * WHAT IT DOES NOT DO. No network, no DNS, no live SPF/DKIM verification. The
  * authentication verdict is READ from the headers, which is why this file
  * spends more code on deciding which of those headers to believe than it does
- * on anything else. Attachments are parsed out of the message but not yet
- * scored — that stage is on the roadmap, and until it lands this package will
- * not imply it looked at them.
+ * on anything else. Attachments are inspected structurally — name, declared
+ * type, magic bytes, zip directory — and never opened, unpacked or executed:
+ * this is a spam scanner, and a clean attachment verdict means "nothing
+ * deceptive about this file", never "safe to open".
  */
 import PostalMime, { type Address, type Email } from 'postal-mime';
 
+import { assessAttachmentSignals } from './attachments/rules.js';
 import { assessContentSignals } from './content/rules.js';
 import { extractAuthHeaderBlock, parseAuthenticationHeaders } from './headers/auth-results.js';
 import { headerLookupFromText, headerValuesFromText } from './headers/lookup.js';
@@ -72,7 +74,13 @@ export interface ScannedMessage {
   fromAddress: string | null;
   /** The `Date:` header as the sender wrote it, unix SECONDS; null if absent or unparseable. */
   date: number | null;
-  /** Filenames and MIME types only. Attachment CONTENT is not scored yet. */
+  /**
+   * Filenames and declared MIME types, for a caller listing what arrived.
+   *
+   * The bytes ARE scored — see the `attachment-*` reasons — but they are not
+   * returned here: an attachment's content is the largest thing in a message
+   * and a caller who wants it already has the message it came from.
+   */
   attachments: { filename: string | null; mimeType: string }[];
 }
 
@@ -84,7 +92,7 @@ export interface ScanResult {
   verdict: SpamVerdict | null;
   isSpam: boolean;
   suspicious: boolean;
-  /** Header-stage reasons first, then content-stage, so the explanation reads top-down. */
+  /** Header stage first, then content, then attachments, so it reads top-down. */
   reasons: SpamReason[];
   /** What the trusted `Authentication-Results` said; null when there was none to trust. */
   auth: AuthStatus | null;
@@ -249,7 +257,18 @@ export function scanParsed(email: Email, options: ScanOptions = {}): ScanResult 
     html: email.html ?? null,
   });
 
-  const merged = mergeAssessments(headerAssessment, contentAssessment);
+  // The bytes as the parser decoded them, so the magic-number and zip-directory
+  // rules read the real file rather than its base64. Nothing is executed,
+  // unpacked or inflated — see `attachments/zip.ts` for why that matters.
+  const attachmentAssessment = assessAttachmentSignals(
+    email.attachments.map((attachment) => ({
+      filename: attachment.filename,
+      mimeType: attachment.mimeType,
+      content: typeof attachment.content === 'string' ? null : attachment.content,
+    })),
+  );
+
+  const merged = mergeAssessments(headerAssessment, contentAssessment, attachmentAssessment);
   return {
     assessed: true,
     score: merged.score,

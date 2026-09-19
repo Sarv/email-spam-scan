@@ -54,7 +54,19 @@ export type SpamReasonId =
   | 'link-display-mismatch'
   | 'link-bare-ip'
   | 'link-userinfo'
-  | 'link-punycode';
+  | 'link-punycode'
+  // The attachment stage. Structural facts about a file — what its name
+  // claims, what its declared type claims, and what its first bytes say —
+  // never an opinion about its contents, which are not opened, unpacked or
+  // executed. Not an antivirus: none of these means "infected", and their
+  // absence means "nothing deceptive", not "safe to open".
+  | 'attachment-executable'
+  | 'attachment-double-extension'
+  | 'attachment-name-spoof'
+  | 'attachment-type-mismatch'
+  | 'attachment-macro'
+  | 'attachment-archive-executable'
+  | 'attachment-encrypted-archive';
 
 export interface SpamReason {
   id: SpamReasonId;

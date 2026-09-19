@@ -1,6 +1,7 @@
+import type { Email } from 'postal-mime';
 import { describe, expect, it } from 'vitest';
 
-import { scan, scanMany, trustedAuthHeaders, type BulkScanInput } from '../src/scan.js';
+import { scan, scanMany, scanParsed, trustedAuthHeaders, type BulkScanInput } from '../src/scan.js';
 
 /** A raw RFC 5322 message. Headers as given, then a blank line, then the body. */
 function message(headers: string[], body = 'Hello, the invoice is attached.\r\n'): string {
@@ -113,6 +114,83 @@ describe('scan', () => {
     expect(
       (await scan(skewed, { receivedAt: atTheTime })).reasons.map((reason) => reason.id),
     ).not.toContain('date-skew');
+  });
+
+  // Regression: the attachment stage has to reach the DECODED bytes. The
+  // wire carries base64, and a scanner that sniffs the base64 sees a text
+  // file every time — every magic-number and zip rule silently stops firing,
+  // and the only symptom is attachments that never score.
+  it('scores an attachment from its decoded bytes, end to end', async () => {
+    // `TVqQAAMAAAA=` is `MZ\x90\0\x03\0\0\0` — a Windows executable, sent
+    // under a document name and declared as a PDF.
+    const raw = [
+      'From: alex@example.com',
+      'To: sam@test.com',
+      'Subject: Invoice',
+      'Message-ID: <att2@example.com>',
+      'Date: Wed, 3 Sep 2026 10:11:00 +0000',
+      RECEIVED,
+      'Content-Type: multipart/mixed; boundary="B"',
+      '',
+      '--B',
+      'Content-Type: text/plain',
+      '',
+      'See attached.',
+      '--B',
+      'Content-Type: application/pdf; name="invoice.pdf.exe"',
+      'Content-Disposition: attachment; filename="invoice.pdf.exe"',
+      'Content-Transfer-Encoding: base64',
+      '',
+      'TVqQAAMAAAA=',
+      '--B--',
+      '',
+    ].join('\r\n');
+
+    const result = await scan(raw);
+    const ids = result.reasons.map((reason) => reason.id);
+    expect(ids).toContain('attachment-double-extension');
+    expect(ids).toContain('attachment-executable');
+    expect(ids).toContain('attachment-type-mismatch');
+    expect(result.isSpam).toBe(true);
+    // The names and types are still reported; the bytes are not.
+    expect(result.message.attachments).toEqual([
+      { filename: 'invoice.pdf.exe', mimeType: 'application/pdf' },
+    ]);
+  });
+
+  // Regression: `postal-mime` types an attachment's content as
+  // `ArrayBuffer | Uint8Array | string`, and the string case is real — an
+  // attachment the parser handed back as text. Passing a string into the
+  // byte rules would sniff a type off characters that are not the file, so
+  // the scan drops it and keeps the name-based rules.
+  it('scores the name when a parser hands back attachment content as text', () => {
+    const parsed = {
+      headerLines: [],
+      from: { name: 'Alex Carter', address: 'alex@example.com' },
+      to: [{ name: 'Sam Riley', address: 'sam@test.com' }],
+      subject: 'Invoice',
+      messageId: '<text@example.com>',
+      date: 'Wed, 3 Sep 2026 10:11:00 +0000',
+      text: 'See attached.',
+      attachments: [
+        {
+          filename: 'invoice.pdf.exe',
+          mimeType: 'application/pdf',
+          disposition: 'attachment',
+          content: 'not really bytes',
+        },
+      ],
+    } as unknown as Email;
+
+    const result = scanParsed(parsed, {
+      receivedAt: Math.floor(Date.UTC(2026, 8, 3, 10, 11, 0) / 1000),
+    });
+    const ids = result.reasons.map((reason) => reason.id);
+    // Read from the name, which is all there is.
+    expect(ids).toContain('attachment-double-extension');
+    expect(ids).toContain('attachment-executable');
+    // Not read from the string: nothing may be sniffed out of it.
+    expect(ids).not.toContain('attachment-type-mismatch');
   });
 
   it('reports attachment names and types without claiming to have scored them', async () => {

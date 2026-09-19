@@ -16,10 +16,15 @@ export default defineConfig({
       reporter: ['text', 'html'],
       include: ['src/**'],
       // A barrel is `export` lines and nothing else; counting it inflates the
-      // number without testing anything. `entry-points.test.ts` reads both of
+      // number without testing anything. `entry-points.test.ts` reads each of
       // these as TEXT and asserts what they re-export, which is the only thing
       // about them that can be wrong.
-      exclude: ['src/index.ts', 'src/headers/index.ts', 'src/content/index.ts'],
+      exclude: [
+        'src/index.ts',
+        'src/headers/index.ts',
+        'src/content/index.ts',
+        'src/attachments/index.ts',
+      ],
       // Enforced, not aspirational. A wrong verdict here either files somebody's
       // invoice as spam or lets a phish through with a green shield, and both
       // failures are silent — nobody reports the mail they never saw. An

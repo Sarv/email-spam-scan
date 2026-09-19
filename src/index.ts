@@ -5,6 +5,7 @@
  *
  *   `/verdict`  — zero dependencies, for reading a stored score back.
  *   `/headers`  — zero dependencies, for reading raw header text.
+ *   `/attachments` — zero dependencies, the attachment stage on its own.
  *   `/identity` — `tldts` only, for the sender rule.
  *   `/links`    — the deceptive-link checks.
  *   `/security` — the level decision, for a UI that displays one.
@@ -104,6 +105,32 @@ export {
   type SpamPhraseGroup,
   type VocabularyHit,
 } from './content/index.js';
+export {
+  asBytes,
+  assessAttachmentSignals,
+  expectedTypesForExtension,
+  expectedTypesForMimeType,
+  extensionsOf,
+  inspectAttachment,
+  inspectFilename,
+  isExecutableType,
+  listZipEntries,
+  sniffFileType,
+  stripBidiControls,
+  ARCHIVE_EXECUTABLE_EXTENSIONS,
+  ARCHIVE_EXTENSIONS,
+  DECOY_EXTENSIONS,
+  EXECUTABLE_EXTENSIONS,
+  MACRO_ENABLED_EXTENSIONS,
+  type AttachmentContent,
+  type AttachmentFacts,
+  type AttachmentInput,
+  type FilenameFacts,
+  type SniffedType,
+  type TypeMismatch,
+  type ZipEntry,
+  type ZipListing,
+} from './attachments/index.js';
 export {
   assessEmailSecurity,
   linkRuleKey,

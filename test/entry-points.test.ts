@@ -26,6 +26,11 @@ import { describe, expect, it } from 'vitest';
 const EXPECTED: Record<string, readonly string[]> = {
   'src/verdict.ts': [],
   'src/headers/index.ts': [],
+  // The attachment stage reads magic bytes, filenames and a zip's own
+  // directory, and does all three without a package — see the note in
+  // `attachments/zip.ts` on why an inflater is the one thing a scanner that
+  // is handed hostile archives must not carry.
+  'src/attachments/index.ts': [],
   'src/identity.ts': ['tldts'],
   'src/links.ts': ['htmlparser2', 'tldts'],
   'src/security.ts': ['htmlparser2', 'tldts'],
@@ -84,12 +89,13 @@ describe('entry-point dependency cost', () => {
     });
   }
 
-  // The two zero-dependency entries are the load-bearing ones: they are what a
+  // The zero-dependency entries are the load-bearing ones: they are what a
   // browser or a worker imports. Stated separately so the reason survives a
   // future edit to the table above.
-  it('keeps /verdict and /headers free of any third-party package', () => {
+  it('keeps /verdict, /headers and /attachments free of any third-party package', () => {
     expect(externalDeps('src/verdict.ts')).toEqual([]);
     expect(externalDeps('src/headers/index.ts')).toEqual([]);
+    expect(externalDeps('src/attachments/index.ts')).toEqual([]);
   });
 
   // The barrel must reach everything the narrow entries do, or a Node consumer
@@ -97,6 +103,7 @@ describe('entry-point dependency cost', () => {
   it('re-exports every narrow entry from the main entry', () => {
     const barrel = readFileSync(resolve(SRC_ROOT, 'src/index.ts'), 'utf8');
     for (const path of [
+      './attachments/index.js',
       './content/index.js',
       './headers/index.js',
       './identity.js',

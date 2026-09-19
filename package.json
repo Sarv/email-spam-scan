@@ -79,6 +79,16 @@
         "default": "./dist/security.cjs"
       }
     },
+    "./attachments": {
+      "import": {
+        "types": "./dist/attachments.d.ts",
+        "default": "./dist/attachments.js"
+      },
+      "require": {
+        "types": "./dist/attachments.d.cts",
+        "default": "./dist/attachments.cjs"
+      }
+    },
     "./content": {
       "import": {
         "types": "./dist/content.d.ts",
