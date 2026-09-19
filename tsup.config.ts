@@ -47,6 +47,11 @@ export default defineConfig({
     // through a dynamic import, so nothing here — and nothing that imports the
     // scanner — carries it unless a consumer installs it and calls in.
     verify: 'src/verify.ts',
+    // `reputation` is the other entry that can reach the network, and the only
+    // Node-only one: its default resolver comes from `node:dns`, loaded — like
+    // `mailauth` above — through a dynamic import, so nothing resolves it
+    // until a lookup actually happens and no browser bundle trips over it.
+    reputation: 'src/reputation.ts',
   },
   format: ['esm', 'cjs'],
   dts: true,

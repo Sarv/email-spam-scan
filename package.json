@@ -118,6 +118,16 @@
         "types": "./dist/verify.d.cts",
         "default": "./dist/verify.cjs"
       }
+    },
+    "./reputation": {
+      "import": {
+        "types": "./dist/reputation.d.ts",
+        "default": "./dist/reputation.js"
+      },
+      "require": {
+        "types": "./dist/reputation.d.cts",
+        "default": "./dist/reputation.cjs"
+      }
     }
   },
   "main": "./dist/index.cjs",

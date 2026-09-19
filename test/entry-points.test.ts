@@ -37,6 +37,12 @@ const EXPECTED: Record<string, readonly string[]> = {
   // error rather than a missing module. The assertion below is what keeps that
   // true, because the walk above cannot see a dynamic import.
   'src/verify.ts': [],
+  // `ipaddr.js` and nothing else. The reputation stage asks a blocklist about
+  // an address, so it needs the same address grammar and the same
+  // public-unicast gate `extractOriginIp` applies — it must never query an
+  // operator about someone's `10.x` relay. Its resolver comes from `node:dns`
+  // through a DYNAMIC import, for the same reason `mailauth` does below.
+  'src/reputation.ts': ['ipaddr.js'],
   'src/identity.ts': ['tldts'],
   'src/links.ts': ['htmlparser2', 'tldts'],
   'src/security.ts': ['htmlparser2', 'tldts'],
@@ -115,6 +121,17 @@ describe('entry-point dependency cost', () => {
     expect(source).not.toMatch(/^(?:import|export)\s[^;]*\bfrom\s+'mailauth'/m);
   });
 
+  // The same regression for the other networked entry, and here the stakes are
+  // a build failure rather than a fat bundle: `node:dns` does not exist in a
+  // browser, so a static import would break every bundler that follows the
+  // main entry — which re-exports this module — whether or not the consumer
+  // ever looks up a blocklist.
+  it('reaches node:dns only through a dynamic import, never a static one', () => {
+    const source = readFileSync(resolve(SRC_ROOT, 'src/reputation.ts'), 'utf8');
+    expect(source).toContain("await import('node:dns/promises')");
+    expect(source).not.toMatch(/^(?:import|export)\s[^;]*\bfrom\s+'node:/m);
+  });
+
   // The barrel must reach everything the narrow entries do, or a Node consumer
   // who follows the README and imports only the main entry loses a name.
   it('re-exports every narrow entry from the main entry', () => {
@@ -125,6 +142,7 @@ describe('entry-point dependency cost', () => {
       './headers/index.js',
       './identity.js',
       './links.js',
+      './reputation.js',
       './scan.js',
       './security.js',
       './urls.js',

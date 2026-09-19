@@ -12,9 +12,11 @@
  *   `/content`  — the body-content stage.
  *   `/scan`     — the whole pipeline over a raw message; the one entry that
  *                 costs a MIME parser.
- *   `/verify`   — opt-in SPF/DKIM/DMARC verification against DNS; the one
- *                 entry that can make a network call, and the only one whose
- *                 dependency (`mailauth`) is an optional peer.
+ *   `/verify`   — opt-in SPF/DKIM/DMARC verification against DNS; one of the
+ *                 two entries that can make a network call, and the only one
+ *                 whose dependency (`mailauth`) is an optional peer.
+ *   `/reputation` — opt-in DNS blocklist lookups; the other entry that can
+ *                 make a network call, and the only Node-only one.
  *
  * All are re-exported here, so a Node consumer needs one import and a browser
  * consumer can still avoid the address parser, the freemail corpus and the
@@ -178,3 +180,25 @@ export {
   type VerifyInput,
   type VerifyOptions,
 } from './verify.js';
+export {
+  assessReputation,
+  blocklistQueryName,
+  checkReputation,
+  normalizeQueryDomain,
+  readBlocklistCodes,
+  reverseIpLabel,
+  BLOCKLISTS,
+  SPAMCOP,
+  SPAMHAUS_DBL,
+  SPAMHAUS_ZEN,
+  type Blocklist,
+  type BlocklistCode,
+  type BlocklistHit,
+  type BlocklistKind,
+  type CodeReading,
+  type DnsQuery,
+  type ReputationLookupError,
+  type ReputationOptions,
+  type ReputationResult,
+  type ReputationTarget,
+} from './reputation.js';

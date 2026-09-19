@@ -66,7 +66,14 @@ export type SpamReasonId =
   | 'attachment-type-mismatch'
   | 'attachment-macro'
   | 'attachment-archive-executable'
-  | 'attachment-encrypted-archive';
+  | 'attachment-encrypted-archive'
+  // The reputation stage. Not a fact about this message at all: what other
+  // operators have already observed about the machine that delivered it and
+  // the domain it claims. It is the only stage whose evidence comes from off
+  // the network, which is why it is opt-in, asynchronous, and reaches the
+  // scanner as a finished assessment rather than as a rule.
+  | 'reputation-ip-listed'
+  | 'reputation-domain-listed';
 
 export interface SpamReason {
   id: SpamReasonId;
