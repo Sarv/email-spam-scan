@@ -21,7 +21,9 @@
  * theirs to call — and hands the answer back here as `options.auth`. That way
  * round, `scan` stays a function that CANNOT make a network call, which is a
  * far easier thing to reason about in an ingest loop than one that sometimes
- * does. Attachments are inspected structurally — name, declared
+ * does. `options.reputation` is the same arrangement for blocklists: the DNS
+ * happens in `./reputation.js`, and only its assessment arrives here.
+ * Attachments are inspected structurally — name, declared
  * type, magic bytes, zip directory — and never opened, unpacked or executed:
  * this is a spam scanner, and a clean attachment verdict means "nothing
  * deceptive about this file", never "safe to open".
@@ -39,6 +41,7 @@ import {
   mergeAssessments,
   spamVerdict,
   type AuthStatus,
+  type SpamAssessment,
   type SpamReason,
   type SpamVerdict,
 } from './verdict.js';
@@ -83,6 +86,20 @@ export interface ScanOptions {
    * out degrades to what the trusted headers said rather than to nothing.
    */
   auth?: AuthStatus | null;
+  /**
+   * An assessment from `assessReputation()` (the `/reputation` entry point),
+   * folded into this message's score.
+   *
+   * Same bargain as `auth`, and for the same reason: the blocklist queries are
+   * DNS, so they happen outside this function, on your schedule, against the
+   * zones you chose and are entitled to query. What arrives here is the
+   * result, which scores like any other stage.
+   *
+   * `null` or absent simply contributes nothing. A lookup that failed, or one
+   * you decided not to run, leaves the score exactly where the message's own
+   * contents put it — never lower, and never a penalty for the silence.
+   */
+  reputation?: SpamAssessment | null;
 }
 
 /** The parts of the message a caller usually wants back alongside the verdict. */
@@ -287,7 +304,12 @@ export function scanParsed(email: Email, options: ScanOptions = {}): ScanResult 
     })),
   );
 
-  const merged = mergeAssessments(headerAssessment, contentAssessment, attachmentAssessment);
+  const merged = mergeAssessments(
+    headerAssessment,
+    contentAssessment,
+    attachmentAssessment,
+    options.reputation,
+  );
   return {
     assessed: true,
     score: merged.score,

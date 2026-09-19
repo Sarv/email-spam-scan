@@ -1,6 +1,7 @@
 import type { Email } from 'postal-mime';
 import { describe, expect, it } from 'vitest';
 
+import { assessReputation, type ReputationResult } from '../src/reputation.js';
 import { scan, scanMany, scanParsed, trustedAuthHeaders, type BulkScanInput } from '../src/scan.js';
 import { verifyAuthentication } from '../src/verify.js';
 
@@ -16,6 +17,17 @@ import {
 function message(headers: string[], body = 'Hello, the invoice is attached.\r\n'): string {
   return `${headers.join('\r\n')}\r\n\r\n${body}`;
 }
+
+/** A lookup that reached every zone and found nothing. */
+const NO_HITS: ReputationResult = {
+  ip: '93.184.216.34',
+  domain: 'example.com',
+  listed: false,
+  hits: [],
+  checked: ['zen.spamhaus.org'],
+  errors: [],
+  completed: true,
+};
 
 const RECEIVED = 'Received: by mx.test.com with ESMTPS id abc; Wed, 3 Sep 2026 10:11:12 +0000';
 const CLEAN = [
@@ -472,6 +484,65 @@ describe('scan with a verified authentication verdict', () => {
 
     expect(result.auth).toEqual({ spf: 'pass', dkim: 'pass', dmarc: 'pass', overall: 'pass' });
     expect(result.reasons.map((reason) => reason.id)).not.toContain('auth-failed');
+  });
+});
+
+describe('scan with a reputation assessment', () => {
+  /** What `assessReputation` hands back for a listed sending address. */
+  const listed = assessReputation({
+    ip: '93.184.216.34',
+    domain: null,
+    listed: true,
+    hits: [
+      {
+        name: 'spamhaus-zen',
+        zone: 'zen.spamhaus.org',
+        kind: 'ip',
+        target: '93.184.216.34',
+        codes: ['127.0.0.2'],
+        meanings: ['SBL: a known source of spam'],
+        points: 4,
+        text: null,
+      },
+    ],
+    checked: ['zen.spamhaus.org'],
+    errors: [],
+    completed: true,
+  });
+
+  // THE point of the option, and the seam between the two halves: the shape
+  // `assessReputation` returns is the shape `scan` accepts, and its reasons
+  // reach the same score and the same stored `reasons` array as every other
+  // stage. A mismatch here would only ever show up in a consumer's code.
+  it("folds a listing into the score alongside the message's own signals", async () => {
+    const clean = await scan(message(CLEAN));
+    const result = await scan(message(CLEAN), { reputation: listed });
+
+    expect(result.score).toBe(clean.score + 4);
+    expect(result.reasons).toEqual([
+      ...clean.reasons,
+      {
+        id: 'reputation-ip-listed',
+        points: 4,
+        detail:
+          'The sending address 93.184.216.34 is listed by spamhaus-zen (SBL: a known source of spam).',
+      },
+    ]);
+    expect(result.verdict).toBe('suspicious');
+  });
+
+  // Regression: a blocklist lookup that failed, timed out, or was never run
+  // must cost the message nothing. Treating silence as a penalty would file
+  // mail as spam for the duration of a DNS outage — and treating it as a
+  // bonus would do the reverse.
+  it('scores a message identically when no reputation was supplied', async () => {
+    const baseline = await scan(message(CLEAN));
+
+    for (const options of [{}, { reputation: null }, { reputation: assessReputation(NO_HITS) }]) {
+      const result = await scan(message(CLEAN), options);
+      expect(result.score).toBe(baseline.score);
+      expect(result.reasons).toEqual(baseline.reasons);
+    }
   });
 });
 
