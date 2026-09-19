@@ -2,6 +2,15 @@ import type { Email } from 'postal-mime';
 import { describe, expect, it } from 'vitest';
 
 import { scan, scanMany, scanParsed, trustedAuthHeaders, type BulkScanInput } from '../src/scan.js';
+import { verifyAuthentication } from '../src/verify.js';
+
+import {
+  fakeResolver,
+  signedMessage,
+  PASSING_ZONE,
+  SENDER_IP,
+  SIGNING_DOMAIN,
+} from './dkim-fixture.js';
 
 /** A raw RFC 5322 message. Headers as given, then a blank line, then the body. */
 function message(headers: string[], body = 'Hello, the invoice is attached.\r\n'): string {
@@ -400,6 +409,69 @@ describe('scan with an authserv configured', () => {
       expect(result.auth?.dmarc).toBe('fail');
       expect(result.reasons.map((reason) => reason.id)).toContain('auth-failed');
     }
+  });
+});
+
+describe('scan with a verified authentication verdict', () => {
+  // THE point of the option. The headers on this message say every check
+  // passed; the verification says DMARC failed. A verdict you established
+  // outranks a sentence somebody typed into a header, and if it did not, doing
+  // the DNS work would buy nothing.
+  it('believes the verified verdict over the one written in the headers', async () => {
+    const result = await scan(message(CLEAN), {
+      auth: { spf: 'pass', dkim: 'fail', dmarc: 'fail', overall: 'fail' },
+    });
+
+    expect(result.auth).toEqual({ spf: 'pass', dkim: 'fail', dmarc: 'fail', overall: 'fail' });
+    expect(result.reasons.map((reason) => reason.id)).toContain('auth-failed');
+  });
+
+  // Regression: a verification that timed out hands back no verdict, and the
+  // message must still be scored on what the trusted headers said rather than
+  // dropping to "nothing is known" — which would silently disable the
+  // authentication rules for the whole duration of a DNS outage.
+  it('falls back to the headers when no verified verdict was reached', async () => {
+    const result = await scan(message(CLEAN), { auth: null });
+
+    expect(result.auth).toEqual({ spf: 'pass', dkim: 'pass', dmarc: 'pass', overall: 'pass' });
+  });
+
+  // Regression: the header block is still read even when its verdict is
+  // overridden, because the origin IP is extracted from those same headers. An
+  // implementation that skipped the block once it had an answer would lose the
+  // address, and with it every rule that depends on where the message came
+  // from.
+  it('still reads the origin IP out of the headers it overrode', async () => {
+    const raw = message([
+      'Received: from sender.example ([93.184.216.34]) by mx.test.com; Wed, 3 Sep 2026 10:11:12 +0000',
+      'Authentication-Results: mx.test.com; spf=pass smtp.mailfrom=example.com',
+      ...CLEAN.slice(2),
+    ]);
+    const result = await scan(raw, {
+      auth: { spf: 'fail', dkim: 'unknown', dmarc: 'unknown', overall: 'fail' },
+    });
+
+    expect(result.auth?.spf).toBe('fail');
+    expect(result.originIp).toBe('93.184.216.34');
+  });
+
+  // The seam itself, end to end: the shape `verifyAuthentication` returns is
+  // the shape `scan` accepts. Nothing else proves the two halves of this
+  // feature were built against the same type, and a mismatch would only show
+  // up in a consumer's code.
+  it('accepts what verifyAuthentication returns, over a really signed message', async () => {
+    const raw = await signedMessage();
+    const verification = await verifyAuthentication(raw, {
+      ip: SENDER_IP,
+      helo: `mx.${SIGNING_DOMAIN}`,
+      mailFrom: `ankur@${SIGNING_DOMAIN}`,
+      resolver: fakeResolver(PASSING_ZONE),
+    });
+
+    const result = await scan(raw, { auth: verification.auth });
+
+    expect(result.auth).toEqual({ spf: 'pass', dkim: 'pass', dmarc: 'pass', overall: 'pass' });
+    expect(result.reasons.map((reason) => reason.id)).not.toContain('auth-failed');
   });
 });
 

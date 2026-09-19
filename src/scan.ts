@@ -16,7 +16,12 @@
  * WHAT IT DOES NOT DO. No network, no DNS, no live SPF/DKIM verification. The
  * authentication verdict is READ from the headers, which is why this file
  * spends more code on deciding which of those headers to believe than it does
- * on anything else. Attachments are inspected structurally — name, declared
+ * on anything else. A caller who wants the real thing runs
+ * `verifyAuthentication` from `./verify.js` — which is async, optional and
+ * theirs to call — and hands the answer back here as `options.auth`. That way
+ * round, `scan` stays a function that CANNOT make a network call, which is a
+ * far easier thing to reason about in an ingest loop than one that sometimes
+ * does. Attachments are inspected structurally — name, declared
  * type, magic bytes, zip directory — and never opened, unpacked or executed:
  * this is a spam scanner, and a clean attachment verdict means "nothing
  * deceptive about this file", never "safe to open".
@@ -64,6 +69,20 @@ export interface ScanOptions {
    * wrote that down". See `trustedAuthHeaders` for what happens without it.
    */
   authserv?: string | readonly string[];
+  /**
+   * A verdict from `verifyAuthentication()` (the `/verify` entry point), used
+   * INSTEAD of the one read from `Authentication-Results`.
+   *
+   * This is how real SPF/DKIM/DMARC verification reaches the rules: you do the
+   * DNS work, on your own schedule and with your own timeout, and the scanner
+   * scores the answer. It is worth more than the header verdict for the reason
+   * the header verdict is hedged everywhere in this file — one is a fact you
+   * established, the other is a sentence somebody typed.
+   *
+   * `null` or absent falls back to the headers, so a verification that timed
+   * out degrades to what the trusted headers said rather than to nothing.
+   */
+  auth?: AuthStatus | null;
 }
 
 /** The parts of the message a caller usually wants back alongside the verdict. */
@@ -199,7 +218,7 @@ export async function scan(raw: RawMessage, options: ScanOptions = {}): Promise<
 export function scanParsed(email: Email, options: ScanOptions = {}): ScanResult {
   const headerText = email.headerLines.map((header) => header.line).join('\n');
   const authBlock = extractAuthHeaderBlock(trustedAuthHeaders(email.headerLines, options.authserv));
-  const auth = authBlock ? parseAuthenticationHeaders(authBlock) : null;
+  const auth = options.auth ?? (authBlock ? parseAuthenticationHeaders(authBlock) : null);
   const lookup = headerLookupFromText(headerText);
   const received = headerValuesFromText(headerText, 'received');
   const from = mailboxes(email.from)[0];
