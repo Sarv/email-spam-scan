@@ -12,6 +12,9 @@
  *   `/content`  — the body-content stage.
  *   `/scan`     — the whole pipeline over a raw message; the one entry that
  *                 costs a MIME parser.
+ *   `/verify`   — opt-in SPF/DKIM/DMARC verification against DNS; the one
+ *                 entry that can make a network call, and the only one whose
+ *                 dependency (`mailauth`) is an optional peer.
  *
  * All are re-exported here, so a Node consumer needs one import and a browser
  * consumer can still avoid the address parser, the freemail corpus and the
@@ -161,3 +164,17 @@ export {
   type SpamReasonId,
   type SpamVerdict,
 } from './verdict.js';
+export {
+  authVerificationFrom,
+  verifyAuthentication,
+  type AuthVerification,
+  type DnsResolver,
+  type MailauthDmarc,
+  type MailauthResult,
+  type MailauthSignature,
+  type MailauthSpf,
+  type MailauthStatus,
+  type VerifiedSignature,
+  type VerifyInput,
+  type VerifyOptions,
+} from './verify.js';

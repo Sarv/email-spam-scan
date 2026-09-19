@@ -31,6 +31,12 @@ const EXPECTED: Record<string, readonly string[]> = {
   // `attachments/zip.ts` on why an inflater is the one thing a scanner that
   // is handed hostile archives must not carry.
   'src/attachments/index.ts': [],
+  // Nothing. `verify` reaches `mailauth` through a DYNAMIC import and declares
+  // it as an optional peer dependency, so a consumer who never verifies pays
+  // nothing for the entry existing — and a consumer who does gets a clear
+  // error rather than a missing module. The assertion below is what keeps that
+  // true, because the walk above cannot see a dynamic import.
+  'src/verify.ts': [],
   'src/identity.ts': ['tldts'],
   'src/links.ts': ['htmlparser2', 'tldts'],
   'src/security.ts': ['htmlparser2', 'tldts'],
@@ -98,6 +104,17 @@ describe('entry-point dependency cost', () => {
     expect(externalDeps('src/attachments/index.ts')).toEqual([]);
   });
 
+  // Regression, and the one this file's static walk CANNOT catch: a dynamic
+  // import is invisible to it, so a refactor that "tidied" the loader into a
+  // normal top-level import would pass every test above while quietly putting
+  // `mailauth` and its dependency tree into the main entry — and into every
+  // bundle that imports this package at all.
+  it('reaches mailauth only through a dynamic import, never a static one', () => {
+    const source = readFileSync(resolve(SRC_ROOT, 'src/verify.ts'), 'utf8');
+    expect(source).toContain("await import('mailauth')");
+    expect(source).not.toMatch(/^(?:import|export)\s[^;]*\bfrom\s+'mailauth'/m);
+  });
+
   // The barrel must reach everything the narrow entries do, or a Node consumer
   // who follows the README and imports only the main entry loses a name.
   it('re-exports every narrow entry from the main entry', () => {
@@ -112,6 +129,7 @@ describe('entry-point dependency cost', () => {
       './security.js',
       './urls.js',
       './verdict.js',
+      './verify.js',
     ]) {
       expect(barrel).toContain(`from '${path}'`);
     }

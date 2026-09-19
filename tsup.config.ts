@@ -42,6 +42,11 @@ export default defineConfig({
     // entry that costs a MIME parser, which is precisely why it is its own:
     // the renderer entries above must never inherit it.
     scan: 'src/scan.ts',
+    // `verify` is the only entry that can reach the network, and the only one
+    // whose dependency is optional: `mailauth` is a peer dependency loaded
+    // through a dynamic import, so nothing here — and nothing that imports the
+    // scanner — carries it unless a consumer installs it and calls in.
+    verify: 'src/verify.ts',
   },
   format: ['esm', 'cjs'],
   dts: true,
