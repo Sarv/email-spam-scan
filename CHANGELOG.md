@@ -9,6 +9,49 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
+- **Reputation** (`/reputation`, `ipaddr.js` only) — `checkReputation(target,
+  blocklists, options)` asks DNS blocklists what they have published about the
+  address a message was delivered from and the domain it claims, and
+  `assessReputation(result)` turns the answer into a scored assessment.
+  Spamhaus ZEN, Spamhaus DBL and SpamCop are described and exported; `node:dns`
+  is reached through a dynamic `import`, so the entry costs a browser bundle
+  nothing but `ipaddr.js`.
+- **No default list of blocklists, deliberately.** `blocklists` is a required
+  argument. Every list has terms — free below some volume, a paid feed above
+  it, and a permanent "over quota" answer once you pass it — and every lookup
+  discloses to that operator a sender your user is receiving mail from. A
+  package that queried zones by default would put you in breach of somebody's
+  terms, and disclose your users' mail, without you having chosen either.
+  `BLOCKLISTS` is a list to read and pick from, not one to inherit.
+- **The return code is read as the answer.** A listing is scored by which code
+  came back where the zone publishes a table (`127.0.0.2` SBL against
+  `127.0.0.10` "should not be delivering mail directly" are not the same
+  evidence), and two kinds of answer are never listings: `127.255.255.0/24`,
+  which is the operator reporting a malformed query, an open resolver or an
+  exceeded quota, and anything outside `127.0.0.0/8`, which is a wildcard or
+  hijacked response. Both reach `errors`. Reading "an A record came back" as
+  "listed" turns one misconfigured resolver into a filter that files every
+  message as spam at once.
+- **A failed lookup is never a clean result.** A timeout, a SERVFAIL or a
+  target not worth querying leave `completed: false` with no hits, rather than
+  `listed: false` presented as an all-clear; zones that did answer keep their
+  hits, so one operator's outage never discards another's listing.
+  `checkReputation` does not throw. Only public addresses are queried — the
+  same gate `extractOriginIp` uses — so private and reserved ranges are skipped
+  rather than published to an operator one query at a time.
+- **Several lists agreeing counts once.** `assessReputation` charges the
+  highest-scoring hit per kind of target rather than the sum, because the
+  public lists mirror each other and ZEN is three lists in one zone; summing
+  would make a score depend on how many zones a deployment configured. The
+  address and the domain are separate facts, so those two do add up.
+- **`ScanOptions.reputation`** — an assessment from a lookup you ran yourself,
+  folded into the message's score. The same arrangement as `options.auth` and
+  for the same reason: the DNS happens outside `scan`, on your schedule and
+  against zones you are entitled to query, and absent or `null` contributes
+  nothing.
+- **`reputation-ip-listed` and `reputation-domain-listed`** (`/verdict`) — two
+  new reason ids, so a stored verdict that includes a blocklist hit still reads
+  back with `parseSpamReasons`.
 - **Real authentication** (`/verify`, no static dependencies) —
   `verifyAuthentication(message, options)` checks SPF, DKIM and DMARC against
   live DNS over the original unmodified bytes, instead of reading a verdict

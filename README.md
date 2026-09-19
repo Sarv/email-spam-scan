@@ -19,13 +19,15 @@ call, no API key, no model to download. Every rule is a small pure function over
 data you already have.
 
 **Status: the header stage, the body-content stage, the attachment stage,
-`scan(rawMessage)`, and authentication verified against DNS.** Sixteen header
-rules, the sender-identity check, deceptive-link detection, the security-level
-decision, seven body-content rules, seven attachment rules and a scanner that
-takes raw RFC 5322 bytes are all here, extracted from a mail client that runs
-them on real mail at ingest. Live SPF/DKIM/DMARC verification is here too, in
-its own entry point you have to ask for by name — see
-[Verifying authentication yourself](#verifying-authentication-yourself). What
+`scan(rawMessage)`, authentication verified against DNS, and blocklist
+lookups.** Sixteen header rules, the sender-identity check, deceptive-link
+detection, the security-level decision, seven body-content rules, seven
+attachment rules and a scanner that takes raw RFC 5322 bytes are all here,
+extracted from a mail client that runs them on real mail at ingest. The two
+things that touch the network — [live SPF/DKIM/DMARC
+verification](#verifying-authentication-yourself) and [blocklist
+lookups](#reputation-asking-somebody-else) — are here too, each in its own
+entry point you have to ask for by name. What
 ships today is listed under [What it does today](#what-it-does-today), and
 nothing else is implied. This package will not tell you it checked something it
 did not check.
@@ -46,6 +48,7 @@ did not check.
 - [Origin IP: which address actually sent this](#origin-ip-which-address-actually-sent-this)
 - [Authentication results: read, not verified](#authentication-results-read-not-verified)
 - [Verifying authentication yourself](#verifying-authentication-yourself)
+- [Reputation: asking somebody else](#reputation-asking-somebody-else)
 - [Roadmap](#roadmap)
 - [API](#api)
 - [Contributing](#contributing)
@@ -65,7 +68,7 @@ Node 18 or newer. TypeScript types ship with the package; ESM and CJS both work.
 
 ## Entry points
 
-Ten, so a browser bundle never has to carry what only a server needs.
+Eleven, so a browser bundle never has to carry what only a server needs.
 
 | Import | Dependencies | Use it for |
 | --- | --- | --- |
@@ -78,7 +81,8 @@ Ten, so a browser bundle never has to carry what only a server needs.
 | `@sarv-in/email-spam-scan/security` | `tldts`, `htmlparser2` | The five-level decision, for the UI that renders it. |
 | `@sarv-in/email-spam-scan/content` | `tldts`, `htmlparser2` | The body-content stage: vocabulary, quote stripping, link structure. |
 | `@sarv-in/email-spam-scan/scan` | all of the above + `postal-mime` | `scan(rawMessage)` and the bulk stream. The only entry that costs a MIME parser. |
-| `@sarv-in/email-spam-scan/verify` | **none statically** — `mailauth`, an optional peer, is `import`ed on first use | Real SPF/DKIM/DMARC verification against DNS. The only entry that can make a network call. |
+| `@sarv-in/email-spam-scan/verify` | **none statically** — `mailauth`, an optional peer, is `import`ed on first use | Real SPF/DKIM/DMARC verification against DNS. One of the two entries that can make a network call. |
+| `@sarv-in/email-spam-scan/reputation` | `ipaddr.js` — `node:dns` is `import`ed on first use | Blocklist lookups for a sending address or a domain. Node only, and it queries nothing you did not name. |
 
 The split exists because the common case in a mail client is displaying a
 verdict that was computed at ingest, hours ago, on a server. That side needs
@@ -201,6 +205,8 @@ INTERNALDATE instead when you have one, because you trust your own server's
 clock more than a header. `auth` replaces the verdict read from the headers with one you verified
 yourself — see
 [Verifying authentication yourself](#verifying-authentication-yourself).
+`reputation` folds in an assessment from a blocklist lookup you ran yourself —
+see [Reputation: asking somebody else](#reputation-asking-somebody-else).
 `knownSpammer: true` applies the categorical
 5-point rule for a sender the recipient has reported. `ownMail: true` returns
 `assessed: false` with a `null` verdict — not judged, which a UI must not render
@@ -259,6 +265,12 @@ against live DNS over the original message, rather than read out of a header
 somebody else wrote. Its own entry point, its own optional dependency, and
 never reached by accident. See
 [Verifying authentication yourself](#verifying-authentication-yourself).
+
+**Reputation** (`checkReputation`, `assessReputation`) — what other operators
+have already published about the machine that delivered a message and the
+domain it claims, asked over DNS. Its own entry point, no default list of zones,
+and never reached by accident. See
+[Reputation: asking somebody else](#reputation-asking-somebody-else).
 
 **The header scorer** (`assessSpamSignals`) — sixteen rules over the envelope,
 the threading headers, the authentication verdict and the bulk-mail headers.
@@ -594,6 +606,108 @@ hash mismatch, no key, expired) and `policy` (a key below `minBitLength`) both
 become `fail`, so that a verified verdict and a Gmail header verdict describe
 the same message the same way rather than disagreeing about a word.
 
+## Reputation: asking somebody else
+
+Every other rule in this package is a fact about the message in front of you.
+This one is not: it asks operators who keep blocklists what they have already
+observed about the machine that delivered it and the domain it claims. That is
+the strongest single signal in spam filtering, and the only one that requires
+telling a third party what you are looking at.
+
+```ts
+import {
+  assessReputation,
+  checkReputation,
+  SPAMHAUS_ZEN,
+  SPAMCOP,
+} from '@sarv-in/email-spam-scan/reputation';
+import { scan } from '@sarv-in/email-spam-scan/scan';
+
+const result = await scan(raw);
+
+const reputation = await checkReputation(
+  { ip: result.originIp, domain: result.message.fromAddress?.split('@')[1] },
+  [SPAMHAUS_ZEN, SPAMCOP], // required: there is no default list
+);
+
+// Re-score with what the operators said. `checkReputation` never throws, so a
+// blocklist outage costs the message nothing.
+const scored = await scan(raw, { reputation: assessReputation(reputation) });
+```
+
+**There is no default list of zones, and there never will be.** `blocklists` is
+a required argument because every list has terms: Spamhaus is free for
+low-volume use and requires a paid data feed above it, SpamCop has its own
+conditions, and several lists return a permanent "you are over quota" answer
+rather than a listing once you pass their threshold. A package that queried
+them by default would put you in breach of somebody's terms without you ever
+choosing to. `BLOCKLISTS` is exported as a starting point to read, not a
+default to inherit — you pass what you have the right to query.
+
+**And it tells the operator what you are scanning.** Every lookup is a DNS
+query naming a sender your user is receiving mail from, and it goes to that
+operator's resolvers, and it is visible to whatever resolver you route through.
+That is a real disclosure, which is the other half of why this is opt-in, in
+its own entry, and never invoked by `scan`.
+
+**The return code is the answer, not the fact that there was one.** A blocklist
+replies to `2.0.0.127.zen.spamhaus.org` with an `A` record inside `127.0.0.0/8`
+and the last octets say what kind of listing it is — `127.0.0.2` is Spamhaus's
+SBL, `127.0.0.10` is the policy list saying "this address should not be
+delivering mail directly at all", which is a far weaker signal about a message
+that arrived via a relay. This package reads the code, scores per code where
+the zone publishes a table, and reports both under `hits[].codes` and
+`hits[].meanings`.
+
+Two answers are emphatically **not** listings, and both reach `errors` instead:
+
+- **`127.255.255.0/24`.** That range is the operator complaining, not
+  answering: malformed query, a query that arrived via a public resolver, or
+  you are over their volume limit. Reading "an A record came back" as "listed"
+  turns a misconfigured resolver into a filter that files **every** message as
+  spam at once.
+- **Anything outside `127.0.0.0/8`.** A wildcard DNS provider, a captive portal
+  or a hijacked response answers with a real address. No blocklist publishes a
+  listing there.
+
+**A failed lookup is not a clean result.** A resolver timeout, a SERVFAIL, or
+nothing worth querying all leave `completed: false` with no hits — never
+`listed: false` presented as an all-clear. Zones that did answer are still in
+`hits` and `checked`, so one operator's outage never discards another's
+listing.
+
+**Several lists agreeing counts once.** `assessReputation` charges the
+**highest-scoring** hit per kind of target, not the sum. The public lists mirror
+and feed each other, and ZEN is three lists in one zone — summing would make a
+message's score depend on how many zones you happened to configure rather than
+on the message. The address and the domain are separate facts about separate
+things, so those two do add up.
+
+**What comes back:**
+
+| Field | |
+| --- | --- |
+| `listed` | whether any zone returned a listing |
+| `hits` | one per listing: the zone, what was asked about, the codes, their meanings, the points, and the TXT explanation if you asked for it |
+| `checked` | the zones that gave a usable answer, listed or not |
+| `errors` | the zones that did not, and why |
+| `completed` | `false` if any zone failed, or if there was nothing worth asking about |
+
+`timeoutMs` (default 5 s), `servers` (your own resolvers rather than the
+system's) and `includeText` (fetch each hit's `TXT` explanation, one extra
+query per listing) are the options. `query` replaces the DNS layer outright,
+which is how the tests run without a network.
+
+**Only public addresses are ever queried.** `checkReputation` reuses the same
+gate as `extractOriginIp`, so private, loopback, link-local, CGNAT and reserved
+ranges are skipped rather than asked about — no operator has anything to say
+about `10.0.0.4`, and asking would publish your network layout to them one
+query at a time.
+
+**Node only.** `node:dns/promises` is reached through a dynamic `import`, so
+the entry costs a browser bundle `ipaddr.js` and nothing else — but calling
+`checkReputation` without an injected `query` needs a Node resolver.
+
 ## Roadmap
 
 Ordered, and open to contribution — see [CONTRIBUTING.md](./CONTRIBUTING.md).
@@ -613,8 +727,10 @@ Ordered, and open to contribution — see [CONTRIBUTING.md](./CONTRIBUTING.md).
    against live DNS via `mailauth`, in its own entry point with its own
    optional dependency, handed back to `scan` through `options.auth`. See
    [Verifying authentication yourself](#verifying-authentication-yourself).
-5. **Reputation.** DNSBL and similar, in a separate package — it makes network
-   calls, so it must never be something you get by accident.
+5. ~~**Reputation.**~~ **Done** — DNSBL lookups for the sending address and the
+   sender domain, in their own entry point with no default list of zones, handed
+   back to `scan` through `options.reputation`. See
+   [Reputation: asking somebody else](#reputation-asking-somebody-else).
 
 ## API
 
@@ -659,6 +775,18 @@ Needs the optional peer `mailauth`; nothing else in the package does.
 - `verifyAuthentication(message, options?): Promise<AuthVerification>` — SPF, DKIM and DMARC against DNS
 - `authVerificationFrom(result): AuthVerification` — the mapping alone, over a `mailauth` result you already have
 - `type VerifyOptions`, `AuthVerification`, `VerifiedSignature`, `VerifyInput`, `DnsResolver`
+
+### Reputation — `@sarv-in/email-spam-scan/reputation`
+
+Node only; `node:dns` is imported on first use. No zone is ever queried unless
+you name it.
+
+- `checkReputation(target, blocklists, options?): Promise<ReputationResult>` — the lookups; never throws
+- `assessReputation(result): SpamAssessment` — the result scored, for `scan`'s `options.reputation`
+- `SPAMHAUS_ZEN`, `SPAMHAUS_DBL`, `SPAMCOP`, `BLOCKLISTS` — described zones to choose from, not a default
+- `reverseIpLabel(ip)`, `normalizeQueryDomain(domain)`, `blocklistQueryName(target, blocklist)` — the query names, on their own
+- `readBlocklistCodes(blocklist, codes): CodeReading` — what a set of return codes means
+- `type Blocklist`, `BlocklistCode`, `BlocklistKind`, `BlocklistHit`, `CodeReading`, `DnsQuery`, `ReputationOptions`, `ReputationResult`, `ReputationTarget`, `ReputationLookupError`
 
 ### Content — `@sarv-in/email-spam-scan/content`
 
