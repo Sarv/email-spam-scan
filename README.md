@@ -18,15 +18,17 @@ score, a verdict, and a list of named reasons a human can read. No service to
 call, no API key, no model to download. Every rule is a small pure function over
 data you already have.
 
-**Status: the header stage, the body-content stage, the attachment stage and
-`scan(rawMessage)`.** Sixteen header rules, the sender-identity check,
-deceptive-link detection, the security-level decision, seven body-content
-rules, seven attachment rules and a scanner that takes raw RFC 5322 bytes are
-all here, extracted from a mail client that runs them on real mail at ingest.
-What is not here yet is live SPF/DKIM/DMARC verification — see
-[Roadmap](#roadmap). What ships today is
-listed under [What it does today](#what-it-does-today), and nothing else is
-implied. This package will not tell you it checked something it did not check.
+**Status: the header stage, the body-content stage, the attachment stage,
+`scan(rawMessage)`, and authentication verified against DNS.** Sixteen header
+rules, the sender-identity check, deceptive-link detection, the security-level
+decision, seven body-content rules, seven attachment rules and a scanner that
+takes raw RFC 5322 bytes are all here, extracted from a mail client that runs
+them on real mail at ingest. Live SPF/DKIM/DMARC verification is here too, in
+its own entry point you have to ask for by name — see
+[Verifying authentication yourself](#verifying-authentication-yourself). What
+ships today is listed under [What it does today](#what-it-does-today), and
+nothing else is implied. This package will not tell you it checked something it
+did not check.
 
 ## Contents
 
@@ -43,6 +45,7 @@ implied. This package will not tell you it checked something it did not check.
 - [Reading a stored verdict back](#reading-a-stored-verdict-back)
 - [Origin IP: which address actually sent this](#origin-ip-which-address-actually-sent-this)
 - [Authentication results: read, not verified](#authentication-results-read-not-verified)
+- [Verifying authentication yourself](#verifying-authentication-yourself)
 - [Roadmap](#roadmap)
 - [API](#api)
 - [Contributing](#contributing)
@@ -62,7 +65,7 @@ Node 18 or newer. TypeScript types ship with the package; ESM and CJS both work.
 
 ## Entry points
 
-Eight, so a browser bundle never has to carry what only a server needs.
+Ten, so a browser bundle never has to carry what only a server needs.
 
 | Import | Dependencies | Use it for |
 | --- | --- | --- |
@@ -75,6 +78,7 @@ Eight, so a browser bundle never has to carry what only a server needs.
 | `@sarv-in/email-spam-scan/security` | `tldts`, `htmlparser2` | The five-level decision, for the UI that renders it. |
 | `@sarv-in/email-spam-scan/content` | `tldts`, `htmlparser2` | The body-content stage: vocabulary, quote stripping, link structure. |
 | `@sarv-in/email-spam-scan/scan` | all of the above + `postal-mime` | `scan(rawMessage)` and the bulk stream. The only entry that costs a MIME parser. |
+| `@sarv-in/email-spam-scan/verify` | **none statically** — `mailauth`, an optional peer, is `import`ed on first use | Real SPF/DKIM/DMARC verification against DNS. The only entry that can make a network call. |
 
 The split exists because the common case in a mail client is displaying a
 verdict that was computed at ingest, hours ago, on a server. That side needs
@@ -194,7 +198,10 @@ exported so you can see exactly which lines survived.
 date-skew rule compares the sender's `Date:` against; it defaults to the
 timestamp on the topmost `Received:` header, and you should pass your IMAP
 INTERNALDATE instead when you have one, because you trust your own server's
-clock more than a header. `knownSpammer: true` applies the categorical
+clock more than a header. `auth` replaces the verdict read from the headers with one you verified
+yourself — see
+[Verifying authentication yourself](#verifying-authentication-yourself).
+`knownSpammer: true` applies the categorical
 5-point rule for a sender the recipient has reported. `ownMail: true` returns
 `assessed: false` with a `null` verdict — not judged, which a UI must not render
 as a green tick.
@@ -246,6 +253,12 @@ the address belongs to another registrable domain. Compared at eTLD+1 via
 from, taken from the SPF evaluator's own record where possible and the
 `Received:` trace otherwise. Private, loopback, link-local, CGNAT and reserved
 ranges are rejected, so you get an address worth reputation-checking or nothing.
+
+**Real authentication** (`verifyAuthentication`) — SPF, DKIM and DMARC checked
+against live DNS over the original message, rather than read out of a header
+somebody else wrote. Its own entry point, its own optional dependency, and
+never reached by accident. See
+[Verifying authentication yourself](#verifying-authentication-yourself).
 
 **The header scorer** (`assessSpamSignals`) — sixteen rules over the envelope,
 the threading headers, the authentication verdict and the bulk-mail headers.
@@ -506,8 +519,80 @@ simply write `X-Anything: dmarc=pass` into a message and be believed.
 `scan` makes this decision for you from the `authserv` option — see
 [Scanning a whole message](#scanning-a-whole-message).
 
-Real verification, via `mailauth`-style DNS lookups, is on the roadmap as an
-explicitly opt-in stage.
+To establish the verdict yourself instead of reading somebody else's, see the
+next section.
+
+## Verifying authentication yourself
+
+Everything above reads a verdict another machine wrote down. The `/verify`
+entry computes one: SPF, DKIM and DMARC against live DNS, over the original
+unmodified bytes.
+
+```ts
+import { verifyAuthentication } from '@sarv-in/email-spam-scan/verify';
+import { scan } from '@sarv-in/email-spam-scan/scan';
+
+const verified = await verifyAuthentication(raw, {
+  ip: '198.51.100.7', // the address that connected — SPF is a question about it
+  helo: 'mail.example.com',
+  mailFrom: 'billing@example.com', // the envelope sender, not the `From:` header
+});
+
+// A verification that did not complete hands back nothing rather than a guess,
+// and `null` tells `scan` to fall back to the trusted headers.
+const result = await scan(raw, { auth: verified.completed ? verified.auth : null });
+```
+
+**It needs [`mailauth`](https://www.npmjs.com/package/mailauth), and it asks for
+it at the last possible moment.** The package is declared as an **optional peer
+dependency** and reached through a dynamic `import` inside the one function
+that uses it. Install it and verification works; leave it out and every other
+part of this package behaves exactly as it did, with only a call to
+`verifyAuthentication` throwing — and throwing a message that says what to
+install. Nothing else in the source imports it, statically or otherwise, which
+is pinned by the same test that walks the import graph for every other entry.
+
+**`scan` will not do this for you, and that is the design.** `scan` and
+`scanParsed` make no network calls at all: the same message scores the same way
+on a laptop with no resolver, in a test, and in a bundle, and nothing you run
+over fifty thousand messages quietly turns into fifty thousand DNS lookups. You
+choose when to verify, with your own timeout and your own concurrency, and hand
+the answer back through `options.auth`.
+
+**Three things have to come from your MTA, because the message does not carry
+them.** `ip` is the address that connected, and SPF is a question about that
+address and nothing else — without it, `spf` comes back `unknown` rather than
+guessed. `helo` is what the client announced itself as. `mailFrom` is the
+envelope sender from `MAIL FROM`, which is not the `From:` header and routinely
+differs on forwarded and bulk mail. A `.eml` file on disk has none of the
+three; a receiving server has all of them.
+
+**What comes back:**
+
+| Field | |
+| --- | --- |
+| `auth` | the same `AuthStatus` the header reader produces, so it drops straight into `scan` and `assessEmailSecurity` |
+| `completed` | `false` when the verification itself failed — a DNS timeout, a resolver error. `auth` then asserts nothing |
+| `spfDomain` | the domain SPF was evaluated for, or `null` when it never was |
+| `signatures` | every DKIM signature: signing domain, selector, `mailauth`'s own verbatim result word, its comment, and whether it aligned with the `From:` domain |
+| `dmarcPolicy` | the policy the domain published — `none`, `quarantine`, `reject` |
+| `error` | why it did not complete, or `null` |
+
+**A verification that failed is not a verdict of `fail`.** A timeout, an
+unreachable resolver or a missing record all return `completed: false` and an
+`auth` of three `unknown`s, never a failure the rules would score. The
+distinction matters because `auth-failed` is a 3-point rule: an outage on your
+side must not start scoring everybody's mail as spam. `timeoutMs` defaults to
+10 seconds, and `resolver` lets you supply your own — a cache, a stub in tests,
+a DoH client.
+
+**Signatures keep `mailauth`'s vocabulary, the rollup does not.** Per signature
+you get the exact word the library used (`pass`, `fail`, `neutral`, `policy`,
+`temperror`) and its comment, because that is diagnostic detail you cannot
+reconstruct. The rolled-up `auth.dkim` is coarser on purpose: `neutral` (body
+hash mismatch, no key, expired) and `policy` (a key below `minBitLength`) both
+become `fail`, so that a verified verdict and a Gmail header verdict describe
+the same message the same way rather than disagreeing about a word.
 
 ## Roadmap
 
@@ -524,7 +609,10 @@ Ordered, and open to contribution — see [CONTRIBUTING.md](./CONTRIBUTING.md).
 3. ~~**Streaming API.**~~ **Done** — `scan(rawMessage)` and `scanMany`,
    returning the JSON verdict per message. See
    [Scanning a whole message](#scanning-a-whole-message).
-4. **Real authentication.** Opt-in SPF/DKIM/DMARC verification against DNS.
+4. ~~**Real authentication.**~~ **Done** — opt-in SPF/DKIM/DMARC verification
+   against live DNS via `mailauth`, in its own entry point with its own
+   optional dependency, handed back to `scan` through `options.auth`. See
+   [Verifying authentication yourself](#verifying-authentication-yourself).
 5. **Reputation.** DNSBL and similar, in a separate package — it makes network
    calls, so it must never be something you get by accident.
 
@@ -538,6 +626,7 @@ Ordered, and open to contribution — see [CONTRIBUTING.md](./CONTRIBUTING.md).
 - `parseSpamReasons(json): SpamReason[]` — never throws
 - `assessmentOf(reasons): SpamAssessment` — sums and applies both thresholds
 - `mergeAssessments(...parts): SpamAssessment` — combines stages; `null` parts are skipped
+- `unknownAuthStatus(): AuthStatus`, `rollUpAuthStatus(components)` — the one rollup both the header reader and the DNS verifier use
 - `type SpamReason`, `SpamReasonId`, `SpamVerdict`, `SpamAssessment`, `AuthStatus`
 
 ### Identity — `@sarv-in/email-spam-scan/identity`
@@ -562,6 +651,14 @@ Ordered, and open to contribution — see [CONTRIBUTING.md](./CONTRIBUTING.md).
 - `scanMany(source, options?): AsyncGenerator<BulkScanResult>` — in input order
 - `trustedAuthHeaders(headerLines, authserv?): string` — which verdicts survived
 - `type ScanOptions`, `ScanResult`, `ScannedMessage`, `RawMessage`, `BulkScanInput`, `BulkScanOptions`, `BulkScanResult`
+
+### Verify — `@sarv-in/email-spam-scan/verify`
+
+Needs the optional peer `mailauth`; nothing else in the package does.
+
+- `verifyAuthentication(message, options?): Promise<AuthVerification>` — SPF, DKIM and DMARC against DNS
+- `authVerificationFrom(result): AuthVerification` — the mapping alone, over a `mailauth` result you already have
+- `type VerifyOptions`, `AuthVerification`, `VerifiedSignature`, `VerifyInput`, `DnsResolver`
 
 ### Content — `@sarv-in/email-spam-scan/content`
 

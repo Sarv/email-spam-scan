@@ -9,6 +9,40 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
+- **Real authentication** (`/verify`, no static dependencies) —
+  `verifyAuthentication(message, options)` checks SPF, DKIM and DMARC against
+  live DNS over the original unmodified bytes, instead of reading a verdict
+  some other machine wrote into a header. It returns the same `AuthStatus` the
+  header reader produces, plus every DKIM signature with its signing domain,
+  selector, verbatim result word, comment and alignment, the SPF domain, the
+  published DMARC policy, and whether the verification completed at all.
+- **`mailauth` is an optional peer dependency, loaded on demand.** It is
+  reached through a dynamic `import` inside the one function that uses it, so
+  installing this package does not install a DNS library and no bundle carries
+  one by accident; the entry-point test that walks the source import graph
+  pins that. Without it installed, `verifyAuthentication` throws a message
+  naming what to install and everything else in the package is unaffected.
+- **`ScanOptions.auth`** — a verified verdict used in place of the one read
+  from `Authentication-Results`. This is how DNS verification reaches the
+  rules, and it is deliberately the long way round: `scan` and `scanParsed`
+  still make no network calls at all, so the same message scores the same way
+  in a test, in a bundle and on a machine with no resolver, and a run over
+  fifty thousand messages does not quietly become fifty thousand DNS lookups.
+  `null` or absent falls back to the headers, so a verification that timed out
+  degrades to what the trusted headers said rather than to nothing.
+- **A failed verification is never a failed verdict.** A timeout, a resolver
+  error or an unreachable nameserver return `completed: false` and three
+  `unknown`s, never `fail`. `auth-failed` is worth 3 points, and an outage on
+  the verifier's side must not start scoring everybody's mail. `timeoutMs`
+  defaults to 10 seconds and `resolver` accepts your own — a cache, a stub, a
+  DoH client.
+- **`unknownAuthStatus` and `rollUpAuthStatus`** (`/verdict`, still zero
+  dependencies) — the "two of three passed" rollup, extracted so the header
+  reader and the DNS verifier cannot drift into disagreeing about the same
+  three component verdicts. The verifier maps `mailauth`'s `neutral` (body
+  hash mismatch, no key, expired) and `policy` (a key below `minBitLength`) to
+  `fail` for the same reason: those are the cases Gmail writes as `dkim=fail`
+  in the header the other producer reads.
 - **`scan(rawMessage)` and `scanMany`** (`/scan`, adds `postal-mime`) — raw RFC
   5322 bytes in, one JSON verdict out, with both stages included. Everything
   else in the package takes pieces a mail client already has; this is for the
