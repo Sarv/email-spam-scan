@@ -30,6 +30,7 @@
  * `trustReceived` (read it out of the topmost `Received:`) is opt-in because
  * those headers are written by machines the reader does not control.
  */
+import { reasonFrom } from './cause.js';
 import { rollUpAuthStatus, unknownAuthStatus, type AuthStatus } from './verdict.js';
 
 /** Anything `mailauth` will read a message from. */
@@ -342,10 +343,6 @@ async function withDeadline<T>(work: Promise<T>, ms: number): Promise<T> {
   } finally {
     clearTimeout(timer);
   }
-}
-
-function reasonFrom(cause: unknown): string {
-  return cause instanceof Error ? cause.message : String(cause);
 }
 
 /**
