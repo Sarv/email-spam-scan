@@ -49,7 +49,7 @@ did not check.
 - [Authentication results: read, not verified](#authentication-results-read-not-verified)
 - [Verifying authentication yourself](#verifying-authentication-yourself)
 - [Reputation: asking somebody else](#reputation-asking-somebody-else)
-- [Roadmap](#roadmap)
+- [Brand marks: BIMI, VMC and favicons](#brand-marks-bimi-vmc-and-favicons)
 - [API](#api)
 - [Contributing](#contributing)
 - [Licence](#licence)
@@ -68,7 +68,7 @@ Node 18 or newer. TypeScript types ship with the package; ESM and CJS both work.
 
 ## Entry points
 
-Eleven, so a browser bundle never has to carry what only a server needs.
+Twelve, so a browser bundle never has to carry what only a server needs.
 
 | Import | Dependencies | Use it for |
 | --- | --- | --- |
@@ -83,6 +83,7 @@ Eleven, so a browser bundle never has to carry what only a server needs.
 | `@sarv-in/email-spam-scan/scan` | all of the above + `postal-mime` | `scan(rawMessage)` and the bulk stream. The only entry that costs a MIME parser. |
 | `@sarv-in/email-spam-scan/verify` | **none statically** — `mailauth`, an optional peer, is `import`ed on first use | Real SPF/DKIM/DMARC verification against DNS. One of the two entries that can make a network call. |
 | `@sarv-in/email-spam-scan/reputation` | `ipaddr.js` — `node:dns` is `import`ed on first use | Blocklist lookups for a sending address or a domain. Node only, and it queries nothing you did not name. |
+| `@sarv-in/email-spam-scan/brand` | `tldts`, `htmlparser2` — `@peculiar/x509` and `asn1js`, both optional peers, are `import`ed on first use | The sender's mark: the BIMI logo a domain publishes, the certificate that verifies it, and the favicon that stands in. Runs in a browser; DNS and HTTPS are injected. |
 
 The split exists because the common case in a mail client is displaying a
 verdict that was computed at ingest, hours ago, on a server. That side needs
@@ -504,6 +505,13 @@ parseSpamReasons(row.spam_reasons);     // SpamReason[], [] if absent or corrupt
 that was never scanned and a message that scored zero are different facts, and
 collapsing them shows a green tick on mail nothing ever looked at.
 
+`parseSpamReasons` also renames what this package has renamed: a row written
+under an older id comes back under the current one (`canonicalReasonId` is the
+same mapping on its own), so a reader that switches on today's `SpamReasonId`
+handles a verdict stored a year ago without a special case. An id it has never
+heard of is passed through untouched rather than dropped — a verdict written
+by a newer version still has to render.
+
 ## Origin IP: which address actually sent this
 
 `Received:` headers are appended by each hop, and every hop below your own
@@ -659,7 +667,8 @@ that arrived via a relay. This package reads the code, scores per code where
 the zone publishes a table, and reports both under `hits[].codes` and
 `hits[].meanings`.
 
-Two answers are emphatically **not** listings, and both reach `errors` instead:
+Three answers are emphatically **not** listings, and all three reach `errors`
+instead:
 
 - **`127.255.255.0/24`.** That range is the operator complaining, not
   answering: malformed query, a query that arrived via a public resolver, or
@@ -669,6 +678,27 @@ Two answers are emphatically **not** listings, and both reach `errors` instead:
 - **Anything outside `127.0.0.0/8`.** A wildcard DNS provider, a captive portal
   or a hijacked response answers with a real address. No blocklist publishes a
   listing there.
+- **A refusal the zone publishes inside `127.0.0.0/8`.** The URI lists answer
+  `127.0.0.1` to a query from a public resolver or from a querier over the
+  free-use limit. It is a refusal wearing the clothes of a listing, it arrives
+  for every domain at once, and each zone declares its own in `refusals`.
+  `127.0.0.1` is never read as a listing by any zone.
+
+**Some zones answer in bits, not codes.** SURBL and URIBL pack their categories
+into the last octet as a bitmask, so a domain that is both a phishing site and
+a malware host comes back as `127.0.0.24` — an address that appears in no code
+table. Those zones declare `bits` instead of `codes`, several records are ORed
+together before they are read, and a listing reports every category it sets.
+Reading a bitmask as an exact code silently downgrades the worst listings there
+are; reading it as a boolean makes URIBL's grey list — bulk mail of dubious
+value, not spam — indistinguishable from a spam run.
+
+**Every described code carries a `category`** (`spam`, `exploited`,
+`phishing`, `malware`, `botnet`, `policy`, `abused`, `grey`), reported on the
+hit. It is what lets a consumer group listings across zones, or apply its own
+points table, without copying this catalogue back out of the package. `abused`
+is the one to read twice: a cracked WordPress install is listed, and the
+domain's owner is a victim rather than the sender.
 
 **A failed lookup is not a clean result.** A resolver timeout, a SERVFAIL, or
 nothing worth querying all leave `completed: false` with no hits — never
@@ -681,7 +711,40 @@ listing.
 and feed each other, and ZEN is three lists in one zone — summing would make a
 message's score depend on how many zones you happened to configure rather than
 on the message. The address and the domain are separate facts about separate
-things, so those two do add up.
+things, so those two do add up — as far as `REPUTATION_MAX_POINTS`
+(`SPAM_THRESHOLD + 1`), which is enough for a listed sender to be spam on this
+evidence alone and no more. Pass `{ maxPoints: Infinity }` to score each
+listing in full and run your own ceiling.
+
+**What other recipients already said.** The one signal in this stage that no
+lookup can find: if you run a host that counts spam reports, pass the count for
+this sender's domain as `assessReputation(result, { userReports: 7 })`. Three
+reports (`USER_REPORTS_MIN`) are worth three points (`USER_REPORT_POINTS`),
+charged after the listings out of whatever is left of the budget — one report
+is one opinion, and a crowd's opinion is not an operator's observation. Move
+the line with `minUserReports`. A result with no `domain` ignores the count
+rather than showing it against a blank name.
+
+**A backlog goes through `checkReputationBatch`.** Scoring stored messages
+after the fact means hundreds of addresses across several zones, and the two
+obvious shapes are both wrong: sequential is an hour of round-trips, and
+`Promise.all` over the lot opens a thousand simultaneous queries that c-ares
+will not serve, the operator reads as an attack, and a home router drops on the
+floor.
+
+```ts
+const results = await checkReputationBatch(
+  rows.map((row) => ({ ip: row.originIp, domain: row.senderDomain })),
+  [SPAMHAUS_ZEN, SPAMHAUS_DBL],
+  { concurrency: 8 }, // queries in flight across the whole batch
+);
+// results[i] belongs to rows[i]; a row with nothing worth asking about comes
+// back as completed: false rather than being dropped.
+```
+
+One resolver is built for the batch, results come back in the order the targets
+were given, and a batch where nothing is worth asking about opens no socket at
+all.
 
 **What comes back:**
 
@@ -708,29 +771,72 @@ query at a time.
 the entry costs a browser bundle `ipaddr.js` and nothing else — but calling
 `checkReputation` without an injected `query` needs a Node resolver.
 
-## Roadmap
+## Brand marks: BIMI, VMC and favicons
 
-Ordered, and open to contribution — see [CONTRIBUTING.md](./CONTRIBUTING.md).
+`/brand` answers a different question from the rest of the package. The
+scanner asks whether a message is spam; this asks what mark to show next to a
+sender it has already decided to display — and it is the one entry that both
+reaches the network and runs in a browser, because DNS and HTTPS are injected
+rather than imported.
 
-1. ~~**Body content stage.**~~ **Done in 0.2.0** — spam vocabulary and link
-   structure, scored on the sender's own words rather than the quoted history,
-   with the word and domain lists in this repo as data. See
-   [The content rules](#the-content-rules).
-2. ~~**Attachment stage.**~~ **Done** — dangerous and double extensions,
-   archive contents, macro-bearing Office documents, and a MIME type that
-   disagrees with the magic bytes. Nothing is executed, unpacked or inflated.
-   See [The attachment rules](#the-attachment-rules).
-3. ~~**Streaming API.**~~ **Done** — `scan(rawMessage)` and `scanMany`,
-   returning the JSON verdict per message. See
-   [Scanning a whole message](#scanning-a-whole-message).
-4. ~~**Real authentication.**~~ **Done** — opt-in SPF/DKIM/DMARC verification
-   against live DNS via `mailauth`, in its own entry point with its own
-   optional dependency, handed back to `scan` through `options.auth`. See
-   [Verifying authentication yourself](#verifying-authentication-yourself).
-5. ~~**Reputation.**~~ **Done** — DNSBL lookups for the sending address and the
-   sender domain, in their own entry point with no default list of zones, handed
-   back to `scan` through `options.reputation`. See
-   [Reputation: asking somebody else](#reputation-asking-somebody-else).
+```ts
+import { lookupBimi, discoverFavicon } from '@sarv-in/email-spam-scan/brand';
+
+const mark = await lookupBimi('brand.example');
+if (mark.status === 'verified') {
+  // mark.logo is a data: URI; mark.organization is who a Mark Verifying
+  // Authority says owns it; mark.issuer is the authority that said so.
+} else if (mark.status === 'logo') {
+  // The domain published a logo under an enforcing DMARC policy, but nobody
+  // third-party vouched for it. Show it without a tick, and mark.detail says
+  // why the tick is missing.
+} else {
+  const icon = await discoverFavicon('brand.example');
+}
+```
+
+**A logo is only ever shown under an enforcing DMARC policy.** That is BIMI's
+whole premise: a spoofer must never get to wear the brand. `p=none`, no DMARC
+record at all, or `pct` below 100 all mean no logo, whatever the BIMI record
+says — and for a subdomain sender it is the organisational domain's `sp=` that
+governs, since that is the policy that actually covers the mail.
+
+**The tick is a third party's claim, and it is checked in full.** A Verified
+Mark Certificate earns `status: 'verified'` only when the chain reaches a
+**pinned** Mark Verifying Authority root (`MVA_ROOTS` — the certificates
+themselves, fingerprinted, not a name to trust), the leaf carries the BIMI
+extended key usage `1.3.6.1.5.5.7.3.31`, its SubjectAltName covers the From
+domain, every certificate in the chain is inside its validity dates, and the
+RFC 3709 logotype extension binds **this** logo — by SHA-256 digest, or by an
+embedded copy that matches byte for byte. A certificate that fails any of
+these demotes to `'logo'` with the reason in `detail`; it never silently
+passes, and it never takes the logo away either.
+
+**The logo itself is checked before it is shown.** `checkBimiSvg` requires SVG
+Tiny PS and refuses a file carrying script, event handlers, `foreignObject`,
+or any external reference — a logo is markup a stranger chose, rendered next
+to their name in your reader's mail.
+
+**Statuses are what a cache is keyed on.** `'none'` (no record) is an answer
+worth remembering for a week; `'error'` (the resolver or the host could not be
+reached) is worth about a minute. Nothing here caches — the caller owns that,
+because the caller knows how long it wants to believe an answer.
+
+**The certificate tooling is optional.** `@peculiar/x509` and `asn1js` are
+optional peer dependencies loaded through a dynamic `import` on first use. An
+install without them still gets the logo, the SVG check and the favicon; what
+it loses is the tick, and `detail` says which package to add rather than
+blaming the brand.
+
+**The favicon is a disclosure, so put it behind a setting.** `discoverFavicon`
+asks the domain's homepage for its declared icons, best first, then
+`/favicon.ico`, falling back to the organisational domain for the `notify.`
+and `mailer.` subdomains that serve no website. Every image is identified by
+its own magic bytes, never by the `Content-Type` — a 200 HTML error page is a
+very common answer to a missing favicon and must never become somebody's
+avatar. Fetching one tells that domain, once, that a client at this address
+looked it up: far less than the per-message tracking pixel that remote images
+are, but not nothing.
 
 ## API
 
@@ -739,7 +845,8 @@ Ordered, and open to contribution — see [CONTRIBUTING.md](./CONTRIBUTING.md).
 - `SPAM_THRESHOLD: 5`, `SUSPICIOUS_THRESHOLD: 3`
 - `spamVerdict(score): 'spam' | 'suspicious' | 'clean' | null`
 - `isSpamScore(score): boolean`
-- `parseSpamReasons(json): SpamReason[]` — never throws
+- `parseSpamReasons(json): SpamReason[]` — never throws; renamed ids come back under their current name
+- `canonicalReasonId(id): SpamReasonId` — that renaming on its own
 - `assessmentOf(reasons): SpamAssessment` — sums and applies both thresholds
 - `mergeAssessments(...parts): SpamAssessment` — combines stages; `null` parts are skipped
 - `unknownAuthStatus(): AuthStatus`, `rollUpAuthStatus(components)` — the one rollup both the header reader and the DNS verifier use
@@ -782,11 +889,32 @@ Node only; `node:dns` is imported on first use. No zone is ever queried unless
 you name it.
 
 - `checkReputation(target, blocklists, options?): Promise<ReputationResult>` — the lookups; never throws
-- `assessReputation(result): SpamAssessment` — the result scored, for `scan`'s `options.reputation`
-- `SPAMHAUS_ZEN`, `SPAMHAUS_DBL`, `SPAMCOP`, `BLOCKLISTS` — described zones to choose from, not a default
+- `checkReputationBatch(targets, blocklists, options?): Promise<ReputationResult[]>` — many targets, one resolver, a bounded number of queries in flight
+- `assessReputation(result, options?): SpamAssessment` — the result scored, for `scan`'s `options.reputation`
+- `REPUTATION_MAX_POINTS` — the default ceiling on everything the stage adds
+- `USER_REPORTS_MIN`, `USER_REPORT_POINTS` — how many other recipients must have reported a sender before it counts, and what it is worth
+- `SPAMHAUS_ZEN`, `SPAMHAUS_DBL`, `SPAMCOP`, `BARRACUDA`, `SURBL`, `URIBL`, `BLOCKLISTS` — described zones to choose from, not a default
 - `reverseIpLabel(ip)`, `normalizeQueryDomain(domain)`, `blocklistQueryName(target, blocklist)` — the query names, on their own
 - `readBlocklistCodes(blocklist, codes): CodeReading` — what a set of return codes means
-- `type Blocklist`, `BlocklistCode`, `BlocklistKind`, `BlocklistHit`, `CodeReading`, `DnsQuery`, `ReputationOptions`, `ReputationResult`, `ReputationTarget`, `ReputationLookupError`
+- `type Blocklist`, `BlocklistCode`, `BlocklistCategory`, `BlocklistKind`, `BlocklistHit`, `CodeReading`, `DnsQuery`, `ReputationOptions`, `ReputationBatchOptions`, `AssessReputationOptions`, `ReputationResult`, `ReputationTarget`, `ReputationLookupError`
+
+### Brand — `@sarv-in/email-spam-scan/brand`
+
+Runs anywhere; DNS and HTTPS are injected. `@peculiar/x509` and `asn1js` are
+optional peers, imported on first use, and only the certificate check needs
+them.
+
+- `lookupBimi(fromDomain, options?): Promise<BimiLookup>` — the whole policy: DMARC, record, logo, certificate; never throws
+- `discoverFavicon(domain, options?): Promise<FaviconResult>` — the fallback mark, as a `data:` URI
+- `validateVmc(pem, domain, logo, options?): Promise<VmcResult>` — the certificate on its own
+- `checkBimiSvg(bytes): SvgCheck` — SVG Tiny PS, and nothing executable
+- `parseBimiRecord(txt)`, `parseDmarcRecord(txt)`, `dmarcEnforcesBimi(record, forSubdomain)` — the records, parsed
+- `MVA_ROOTS` — the pinned Mark Verifying Authority roots, with fingerprints and provenance
+- `extractLogotypeEvidence(certificate)`, `decodeLogoDataUri(uri)`, `vmcDomains(certificate)`, `fingerprintHex(bytes)` — the certificate internals
+- `extractIconLinks(html, pageUrl)`, `rankIconCandidates(candidates)`, `sniffImageType(bytes)`, `faviconHosts(domain)` — favicon discovery, in pieces
+- `fetchBounded(fetch, url, maxBytes, options?)`, `defaultFetch()` — the bounded HTTPS boundary both lookups share
+- `BIMI_SELECTOR`, `BIMI_LOGO_MAX_BYTES`, `BIMI_EVIDENCE_MAX_BYTES`, `FAVICON_MAX_BYTES`, `HOMEPAGE_MAX_BYTES`, `BIMI_EKU_OID`, `LOGOTYPE_EXTENSION_OID`
+- `type BimiLookup`, `BimiOptions`, `BimiStatus`, `BimiRecord`, `DmarcRecord`, `DmarcPolicyValue`, `VmcResult`, `VmcStatus`, `ValidateVmcOptions`, `SvgCheck`, `LogotypeEvidence`, `MarkVerifyingAuthorityRoot`, `FaviconResult`, `FaviconStatus`, `FaviconOptions`, `IconCandidate`, `FetchLike`, `FetchResponse`, `FetchedBytes`, `FetchBoundedOptions`
 
 ### Content — `@sarv-in/email-spam-scan/content`
 

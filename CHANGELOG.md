@@ -9,6 +9,59 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
+- **Brand marks** (`/brand`, `htmlparser2` + `tldts`) — `lookupBimi(domain,
+  options)` resolves what a sender domain publishes about its own logo: the
+  DMARC policy that gates it, the `default._bimi` record, the SVG itself, and
+  the Verified Mark Certificate that turns a picture into a verified identity.
+  `discoverFavicon(domain, options)` is the fallback mark for the domains that
+  publish no BIMI at all. Both return a `data:` URI, so whatever renders the
+  mark never talks to the domain.
+- **A logo is shown only under an enforcing DMARC policy.** That is BIMI's
+  whole premise — a spoofer must never get to wear the brand — so `p=none`, no
+  DMARC record, or `pct` below 100 mean no logo whatever the BIMI record says.
+  For a subdomain sender the organisational domain's `sp=` governs, because
+  that is the policy that actually covers the mail.
+- **The tick is a full certificate check, against pinned roots.** `status:
+  'verified'` needs the chain to reach one of the `MVA_ROOTS` shipped in the
+  package — the certificates themselves, by SHA-256 fingerprint, not an
+  authority's name — with the BIMI extended key usage `1.3.6.1.5.5.7.3.31` on
+  the leaf, a SubjectAltName covering the From domain, every certificate
+  inside its validity dates, and the RFC 3709 logotype extension binding
+  **this** logo by digest or by an embedded copy that matches byte for byte
+  (SHA-1 included, because Apple's VMCs still use it). Anything short of that
+  demotes to `'logo'` with the reason in `detail`: never a silent pass, and
+  never taking the brand's logo away over a certificate problem.
+- **The logo is checked before it is shown.** `checkBimiSvg` requires SVG Tiny
+  PS and refuses script, event handlers, `foreignObject` and every external
+  reference, at a 32 KB ceiling with a gzip bomb refused on its decompressed
+  size. A logo is markup a stranger chose, rendered beside their name in a
+  reader's mail.
+- **`@peculiar/x509` and `asn1js` are optional peer dependencies**, reached
+  through dynamic `import`s inside the loader that needs them, and pinned as
+  such by the entry-point test. An install without them still gets the logo,
+  the SVG check and the favicon; what it loses is the tick, and the detail
+  names the package to add rather than blaming the brand's certificate.
+- **The favicon is identified by its bytes, never by its `Content-Type`.** A
+  200 that is really an HTML error page is the usual answer to a missing
+  favicon, and it must never become somebody's avatar. Discovery follows what
+  a browser does — the icons the homepage declares, best first, then
+  `/favicon.ico` — and falls back to the organisational domain for the
+  `notify.` and `mailer.` subdomains that serve no website. Fetching one
+  discloses to that domain, once, that a client at this address looked it up,
+  which is why a consumer should put it behind a setting.
+- **`'none'` and `'error'` are different answers.** A DNS miss means the
+  domain publishes nothing and is worth caching for a week; a resolver failure
+  or an unreachable host is worth about a minute. Nothing here caches — the
+  caller owns that, because the caller knows how long it wants to believe an
+  answer — but conflating the two is how a brand's logo disappears for
+  everyone after one bad afternoon on the network.
+- **The entry runs in a browser.** DNS and HTTPS are injected (`query` and
+  `fetch`, defaulting to `node:dns` and the platform `fetch`), and every byte
+  operation goes through the web platform — `Uint8Array`, `crypto.subtle`,
+  `DecompressionStream` — rather than `node:buffer` or `node:zlib`. The
+  injected `DnsQuery` is the same contract `/reputation` takes, now a shared
+  resolver rather than one per stage, so a caller with its own DoH client or
+  cache passes it to both.
 - **Reputation** (`/reputation`, `ipaddr.js` only) — `checkReputation(target,
   blocklists, options)` asks DNS blocklists what they have published about the
   address a message was delivered from and the domain it claims, and
@@ -43,7 +96,58 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   highest-scoring hit per kind of target rather than the sum, because the
   public lists mirror each other and ZEN is three lists in one zone; summing
   would make a score depend on how many zones a deployment configured. The
-  address and the domain are separate facts, so those two do add up.
+  address and the domain are separate facts, so those two do add up — as far
+  as `REPUTATION_MAX_POINTS` (`SPAM_THRESHOLD + 1`), which is enough for a
+  listed sender to be spam on this evidence alone and no more. The address is
+  charged first and the domain takes what is left, so a truncated reason is
+  always the weaker half; `assessReputation(result, { maxPoints: Infinity })`
+  lifts the ceiling for a caller running its own points table.
+- **Reports from other recipients** —
+  `assessReputation(result, { userReports })` scores the one signal a lookup
+  cannot find: how many other people have already reported this sender's
+  domain as spam. Three reports (`USER_REPORTS_MIN`, movable per call with
+  `minUserReports`) are worth three points (`USER_REPORT_POINTS`) under the
+  new `reputation-user-reported` id — one report is one opinion, and a
+  crowd's opinion is evidence but not an operator's observation. Charged
+  after the listings out of what is left of the same budget, so the crowd
+  can never carry a message over the stage's ceiling by itself, and ignored
+  entirely when the result carries no domain to name.
+- **Stored reasons are read under their current ids.** `parseSpamReasons`
+  maps the ids Sarv Inbox shipped before this package existed
+  (`ip-blocklisted`, `domain-blocklisted`, `user-reported`) onto the
+  namespaced ones, and `canonicalReasonId(id)` exposes the same mapping on
+  its own. A verdict cached a year ago still renders against today's
+  `SpamReasonId` union, and an id from a newer version passes through
+  untouched rather than being dropped — a reader that shows less is better
+  than one that shows a blank row for the message somebody is trying to open.
+- **Bitmask zones** — `Barracuda` (`b.barracudacentral.org`, registration
+  required before its mirror answers anything but NXDOMAIN), `SURBL`
+  (`multi.surbl.org`) and `URIBL` (`multi.uribl.com`) join the catalogue. The
+  two URI lists pack their categories into the last octet, so a domain that is
+  both a phishing site and a malware host answers `127.0.0.24` — an address in
+  no code table. A zone declares `bits` instead of `codes`, several records are
+  ORed before they are read, and every category the mask sets is reported.
+  Reading a bitmask as an exact code downgrades the worst listings there are;
+  reading it as a boolean makes URIBL's grey list — bulk mail of dubious value
+  — indistinguishable from a spam run.
+- **A zone may publish its refusal inside `127.0.0.0/8`.** Both URI lists
+  answer `127.0.0.1` to a query from a public resolver or from a querier over
+  the free-use limit: a refusal in the shape of a listing, arriving for every
+  domain at once. `Blocklist.refusals` names those codes so the error carries
+  the operator's own words, and a refusal that arrives beside a real listing
+  never discards the listing.
+- **A category on every described code** (`spam`, `exploited`, `phishing`,
+  `malware`, `botnet`, `policy`, `abused`, `grey`), reported on the hit, so a
+  consumer can group listings across zones or apply its own points table
+  without copying the catalogue back out of the package.
+- **`checkReputationBatch(targets, blocklists, options)`** — many targets over
+  one resolver, with `concurrency` queries in flight (default 8). A backlog
+  scored after the fact is hundreds of addresses across several zones, and
+  both obvious shapes are wrong: sequential is an hour of round-trips, and
+  `Promise.all` over the lot opens a thousand simultaneous queries that c-ares
+  will not serve and an operator reads as an attack. Results come back in the
+  order the targets were given, and a batch with nothing worth asking about
+  opens no socket at all.
 - **`ScanOptions.reputation`** — an assessment from a lookup you ran yourself,
   folded into the message's score. The same arrangement as `options.auth` and
   for the same reason: the DNS happens outside `scan`, on your schedule and
