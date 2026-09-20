@@ -306,9 +306,27 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   `LINK_WRAPPER_DOMAINS`), extracted so the link stage and the content stage
   answer "where does this actually go?" with one implementation.
 - **`FREEMAIL_DOMAINS`** is now exported — the corpus the freemail rules read.
+- **The reply cut is its own entry** (`/quote`, no dependencies) —
+  `stripQuotedTail(text)` returns everything above the quoted history with the
+  signature left in place, `ownWords(text)` takes the signature and the client
+  footer out as well, and `QUOTE_MARKERS` is the corpus both share. Two callers
+  want opposite things from one cut: a scorer must not charge a sender for the
+  phone number under their own name, and a contact miner is reading for exactly
+  that number. They were two marker lists in two repositories, which is how a
+  rule drifts invisibly — both copies go on returning a plausible string.
 
 ### Changed
 
+- **`ownWords` recognises more of the quoted history**, having taken in the
+  markers the other implementation carried: an attribution `html-to-text` has
+  collapsed into the middle of a line (the shape most HTML mail arrives in),
+  one that opens with the sender's name instead of "On", the French, German
+  and Spanish forms, `Begin forwarded message:`, and an indented `>` prefix.
+  In the other direction it no longer cuts at a bare `From:` line or at a
+  five-character underscore rule, both of which occur in ordinary prose and in
+  signatures — a false cut deletes the sender's own words, silently. Scores
+  computed over long or non-English threads may go DOWN, which is the point:
+  those points were being charged for words somebody else wrote.
 - **BREAKING (behavioural): the link checks now find links in Node.** They
   previously parsed HTML with the ambient `DOMParser`, so in Node they found
   nothing at all: the ingest-time scorer silently reported "no deceptive links"
