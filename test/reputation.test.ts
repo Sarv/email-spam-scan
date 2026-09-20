@@ -28,8 +28,7 @@ const PUBLIC_IP_REVERSED = '34.216.184.93';
 
 /** A public v6 address and its 32 reversed nibbles. */
 const PUBLIC_IPV6 = '2a00:1450:4001:80e::200e';
-const PUBLIC_IPV6_REVERSED =
-  'e.0.0.2.0.0.0.0.0.0.0.0.0.0.0.0.e.0.8.0.1.0.0.4.0.5.4.1.0.0.a.2';
+const PUBLIC_IPV6_REVERSED = 'e.0.0.2.0.0.0.0.0.0.0.0.0.0.0.0.e.0.8.0.1.0.0.4.0.5.4.1.0.0.a.2';
 
 /** A resolver that answers from a table and remembers what it was asked. */
 function fakeDns(answers: Readonly<Record<string, string[] | Error>>): {
