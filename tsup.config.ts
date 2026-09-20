@@ -33,6 +33,13 @@ export default defineConfig({
     // header rules need.
     links: 'src/links.ts',
     security: 'src/security.ts',
+    // `quote` is the smallest entry in the package and the one least about
+    // spam: where somebody else's email begins. It is pure pattern matching
+    // over text, so it costs nothing, and it is its own entry because the two
+    // callers that need it — a scorer reading the sender's own words and a
+    // contact miner reading their sign-off — are otherwise nowhere near each
+    // other, and neither should have to import a corpus to make the cut.
+    quote: 'src/content/quote.ts',
     // `content` is the body stage: the sender's own words and the links in
     // them. It costs an HTML parser and `tldts`, and deliberately not the
     // address parser or the freemail corpus the header rules need — a consumer

@@ -26,6 +26,9 @@ import { describe, expect, it } from 'vitest';
 const EXPECTED: Record<string, readonly string[]> = {
   'src/verdict.ts': [],
   'src/headers/index.ts': [],
+  // Pattern matching over text, and nothing else. This is the entry a
+  // consumer takes when all they want is the reply cut.
+  'src/content/quote.ts': [],
   // The attachment stage reads magic bytes, filenames and a zip's own
   // directory, and does all three without a package — see the note in
   // `attachments/zip.ts` on why an inflater is the one thing a scanner that
@@ -112,10 +115,11 @@ describe('entry-point dependency cost', () => {
   // The zero-dependency entries are the load-bearing ones: they are what a
   // browser or a worker imports. Stated separately so the reason survives a
   // future edit to the table above.
-  it('keeps /verdict, /headers and /attachments free of any third-party package', () => {
+  it('keeps /verdict, /headers, /attachments and /quote free of any third-party package', () => {
     expect(externalDeps('src/verdict.ts')).toEqual([]);
     expect(externalDeps('src/headers/index.ts')).toEqual([]);
     expect(externalDeps('src/attachments/index.ts')).toEqual([]);
+    expect(externalDeps('src/content/quote.ts')).toEqual([]);
   });
 
   // Regression, and the one this file's static walk CANNOT catch: a dynamic

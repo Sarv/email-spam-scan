@@ -99,6 +99,16 @@
         "default": "./dist/content.cjs"
       }
     },
+    "./quote": {
+      "import": {
+        "types": "./dist/quote.d.ts",
+        "default": "./dist/quote.js"
+      },
+      "require": {
+        "types": "./dist/quote.d.cts",
+        "default": "./dist/quote.cjs"
+      }
+    },
     "./scan": {
       "import": {
         "types": "./dist/scan.d.ts",

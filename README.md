@@ -82,6 +82,7 @@ Twelve, so a browser bundle never has to carry what only a server needs.
 | `@sarv-in/email-spam-scan/links` | `tldts`, `htmlparser2` | Deceptive-link detection. |
 | `@sarv-in/email-spam-scan/security` | `tldts`, `htmlparser2` | The five-level decision, for the UI that renders it. |
 | `@sarv-in/email-spam-scan/content` | `tldts`, `htmlparser2` | The body-content stage: vocabulary, quote stripping, link structure. |
+| `@sarv-in/email-spam-scan/quote` | **none** | Where somebody else's email begins: the reply/forward cut on its own, for a scorer or a contact miner. |
 | `@sarv-in/email-spam-scan/scan` | all of the above + `postal-mime` | `scan(rawMessage)` and the bulk stream. The only entry that costs a MIME parser. |
 | `@sarv-in/email-spam-scan/verify` | **none statically** — `mailauth`, an optional peer, is `import`ed on first use | Real SPF/DKIM/DMARC verification against DNS. One of the two entries that can make a network call. |
 | `@sarv-in/email-spam-scan/reputation` | `ipaddr.js` — `node:dns` is `import`ed on first use | Blocklist lookups for a sending address or a domain. Node only, and it queries nothing you did not name. |
@@ -944,11 +945,21 @@ them.
 - `assessContentSignals(input): SpamAssessment` — the whole stage
 - `bodyContent(input): BodyContent` — `{ words, anchors, hiddenText }`, what the rules saw
 - `extractHtml(html): HtmlExtract` — `{ text, quotedText, hiddenText, anchors }`
-- `ownWords(text): string` — plain-text body with quotes, signature and footer removed
+- `ownWords(text): string`, `stripQuotedTail(text): string`, `QUOTE_MARKERS` — re-exported from `/quote` below
 - `matchSpamVocabulary(text, groups?): VocabularyHit[]`, `vocabularyPoints(hits)`
 - `normalizeForMatching(text)`, `containsPhrase(haystack, phrase)`, `collapseWhitespace(text)`
 - `longestShoutRun(text): number`
 - `SPAM_PHRASE_GROUPS`, `VOCABULARY_CAP`
+
+### Quote — `@sarv-in/email-spam-scan/quote`
+
+Zero dependencies, and the one entry here that is not about spam at all: a reply
+carries the mail it answers, and almost nothing you want to do with a body
+should be done to somebody else's half of it.
+
+- `stripQuotedTail(text): string` — everything above the quoted history, signature included. What a contact miner wants: the sign-off is the point, and the only one that must go is the sign-off of the person being replied to
+- `ownWords(text): string` — the same cut, with the signature and the client footer removed too. What a scorer wants: a job title and a phone number are not an argument
+- `QUOTE_MARKERS: readonly RegExp[]` — the markers both cuts share, exported so you can say which one fired
 
 ### Attachments — `@sarv-in/email-spam-scan/attachments`
 
