@@ -64,7 +64,9 @@ pnpm add @sarv-in/email-spam-scan
 yarn add @sarv-in/email-spam-scan
 ```
 
-Node 18 or newer. TypeScript types ship with the package; ESM and CJS both work.
+Node 20 or newer. TypeScript types ship with the package; ESM and CJS both work.
+The optional `verify` entry needs `mailauth`, which itself requires Node 22.19
+or newer; every other entry runs on 20.
 
 ## Entry points
 

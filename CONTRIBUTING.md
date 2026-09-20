@@ -71,7 +71,7 @@ Individual steps: `pnpm lint`, `pnpm type-check`, `pnpm test`,
 `pnpm test:coverage`, `pnpm build`, `pnpm format`.
 
 `pnpm verify` is what CI runs. If it is green locally it will be green there,
-on Linux, macOS and Windows across Node 18, 20, 22 and 24.
+on Linux, macOS and Windows across Node 20, 22 and 24.
 
 ## The map
 

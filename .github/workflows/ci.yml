@@ -41,7 +41,7 @@ jobs:
         # runs, and line-ending handling in a raw header block is exactly the
         # kind of thing that passes on Linux and fails on Windows.
         os: [ubuntu-latest, macos-latest, windows-latest]
-        # 24 as well as 18/20/22, and that is not padding. Node 22 and Node 24
+        # 24 as well as 20/22, and that is not padding. Node 22 and Node 24
         # disagree about WHEN a rejected stream write surfaces: on 24 it throws
         # inside `pipe()` and becomes a promise rejection the caller can catch,
         # on 22 it arrives a tick later as an uncaught exception no caller can
@@ -49,7 +49,11 @@ jobs:
         # `readRawMimeParts`) — every test passed and the suite still failed.
         # This package will stream MIME for the attachment stage, so both sides
         # of that divergence have to be in the matrix from the start.
-        node-version: [18, 20, 22, 24]
+        # No 18: `mailauth`, the optional peer the verify stage loads and the
+        # tests sign with, needs Node >=22.19, and no release of it old enough
+        # to run on 18 is one this package would want a contributor to test
+        # against. 18 has also been end of life since April 2025.
+        node-version: [20, 22, 24]
     steps:
       - uses: actions/checkout@v4
       - uses: pnpm/action-setup@v4
@@ -64,4 +68,13 @@ jobs:
       # coverage reporter actually runs. A rule that can file somebody's
       # invoice as spam must not reach main with an untested branch.
       - run: pnpm test:coverage
+        if: matrix.node-version != 20
+      # Node 20 can run everything this package ships but cannot load
+      # `mailauth` (>=22.19), so the handful of tests that sign a real message
+      # skip themselves there and the coverage gate — which would then fail for
+      # a reason that is not a coverage gap — runs on the versions that can run
+      # the whole suite. What 20 is here for is the rest of it: the scanner
+      # itself, on a runtime consumers still deploy.
+      - run: pnpm test
+        if: matrix.node-version == 20
       - run: pnpm build
