@@ -4,13 +4,19 @@ import {
   assessReputation,
   blocklistQueryName,
   checkReputation,
+  checkReputationBatch,
   normalizeQueryDomain,
   readBlocklistCodes,
   reverseIpLabel,
   BLOCKLISTS,
+  REPUTATION_MAX_POINTS,
   SPAMCOP,
   SPAMHAUS_DBL,
   SPAMHAUS_ZEN,
+  SURBL,
+  URIBL,
+  USER_REPORT_POINTS,
+  USER_REPORTS_MIN,
   type Blocklist,
   type DnsQuery,
   type ReputationResult,
@@ -132,6 +138,7 @@ describe('readBlocklistCodes', () => {
     expect(readBlocklistCodes(SPAMHAUS_ZEN, ['127.0.0.2'])).toEqual({
       listings: ['127.0.0.2'],
       meanings: ['SBL: a known source of spam'],
+      categories: ['spam'],
       points: 4,
       error: null,
     });
@@ -144,6 +151,7 @@ describe('readBlocklistCodes', () => {
     expect(readBlocklistCodes(SPAMHAUS_ZEN, ['127.0.0.42'])).toEqual({
       listings: ['127.0.0.42'],
       meanings: [],
+      categories: [],
       points: 3,
       error: null,
     });
@@ -164,6 +172,7 @@ describe('readBlocklistCodes', () => {
         'PBL: an address that should not deliver mail directly',
         'SBL: a known source of spam',
       ],
+      categories: ['policy', 'spam'],
       points: 4,
       error: null,
     });
@@ -179,6 +188,7 @@ describe('readBlocklistCodes', () => {
     expect(readBlocklistCodes(SPAMHAUS_ZEN, ['127.255.255.254'])).toEqual({
       listings: [],
       meanings: [],
+      categories: [],
       points: 0,
       error: 'the query arrived via a public or open resolver, which the operator refuses',
     });
@@ -214,7 +224,80 @@ describe('readBlocklistCodes', () => {
     expect(readBlocklistCodes(SPAMHAUS_ZEN, [])).toEqual({
       listings: [],
       meanings: [],
+      categories: [],
       points: 0,
+      error: null,
+    });
+  });
+
+  // Regression: the URI lists answer with a BITMASK, so a domain that is both
+  // a phishing site and a malware host comes back as one address, 127.0.0.24,
+  // that appears in no code table. Looking it up as an exact code finds
+  // nothing and scores the zone default, which silently downgrades the worst
+  // kind of listing there is.
+  it('reads a combined bitmask octet as every bit it sets', () => {
+    expect(readBlocklistCodes(SURBL, ['127.0.0.24'])).toEqual({
+      listings: ['127.0.0.24'],
+      meanings: ['a phishing domain', 'a malware domain'],
+      categories: ['phishing', 'malware'],
+      points: 4,
+      error: null,
+    });
+  });
+
+  // The same listing, sent as separate records instead of one octet. Both
+  // forms are valid DNS and both mean the same thing.
+  it('ORs several bitmask records into the same reading', () => {
+    expect(readBlocklistCodes(SURBL, ['127.0.0.8', '127.0.0.16'])).toMatchObject({
+      categories: ['phishing', 'malware'],
+      points: 4,
+    });
+  });
+
+  // Regression: URIBL grey is bulk mail of dubious value, not spam. Reading
+  // the bitmask as a boolean "listed" would file legitimate marketing mail on
+  // one list's mild opinion.
+  it('scores a grey listing as the nudge it is', () => {
+    expect(readBlocklistCodes(URIBL, ['127.0.0.4'])).toMatchObject({
+      meanings: ['URIBL grey: a bulk sender of dubious value'],
+      categories: ['grey'],
+      points: 2,
+    });
+  });
+
+  // A bit the catalogue does not describe is still a listing — the same rule
+  // the exact-code path follows, for the same reason.
+  it('scores an unrecognised bit at the zone default', () => {
+    expect(readBlocklistCodes(SURBL, ['127.0.0.32'])).toEqual({
+      listings: ['127.0.0.32'],
+      meanings: [],
+      categories: [],
+      points: 3,
+      error: null,
+    });
+  });
+
+  // THE regression for the URI lists. Both answer 127.0.0.1 to a query from a
+  // public resolver or from a querier over the free-use limit — a refusal in
+  // the shape of a listing, and one that arrives for EVERY domain at once.
+  it('reads a published refusal in the operator own words, never as a listing', () => {
+    expect(readBlocklistCodes(SURBL, ['127.0.0.1'])).toEqual({
+      listings: [],
+      meanings: [],
+      categories: [],
+      points: 0,
+      error: 'the zone declined the query, which is what it answers a public resolver',
+    });
+    expect(readBlocklistCodes(URIBL, ['127.0.0.1']).error).toMatch(/free-use limit/);
+  });
+
+  // A zone that answers with both has still told us something true about the
+  // domain; dropping the listing because a refusal rode along with it would
+  // lose the only evidence in the answer.
+  it('keeps the listing when a refusal arrives beside it', () => {
+    expect(readBlocklistCodes(SURBL, ['127.0.0.1', '127.0.0.8'])).toMatchObject({
+      listings: ['127.0.0.8'],
+      categories: ['phishing'],
       error: null,
     });
   });
@@ -239,6 +322,48 @@ describe('the published catalogue', () => {
       }
     }
   });
+
+  // The bitmask half of the same typo check: a bit that is not a power of two
+  // matches other bits as well as its own, so one listing would report two
+  // meanings, and a bit above 255 can never be reached at all.
+  it('describes each bitmask zone with real, reachable single bits', () => {
+    for (const blocklist of BLOCKLISTS) {
+      for (const [bit, described] of Object.entries(blocklist.bits ?? {})) {
+        const value = Number(bit);
+        expect(value).toBeGreaterThan(0);
+        expect(value).toBeLessThanOrEqual(255);
+        expect(value & (value - 1)).toBe(0);
+        expect(readBlocklistCodes(blocklist, [`127.0.0.${bit}`])).toMatchObject({
+          meanings: [described.meaning],
+          points: described.points,
+          error: null,
+        });
+      }
+    }
+  });
+
+  // A listing with no category cannot be grouped or re-scored by a consumer,
+  // which is the entire reason the field exists. A zone may leave a code
+  // undescribed; it may not describe one and then say nothing about it.
+  it('gives every described code a category', () => {
+    for (const blocklist of BLOCKLISTS) {
+      const described = [
+        ...Object.values(blocklist.codes ?? {}),
+        ...Object.values(blocklist.bits ?? {}),
+      ];
+      expect(described.length).toBeGreaterThan(0);
+      for (const code of described) expect(code.category).toBeDefined();
+    }
+  });
+
+  // Regression: a zone declared with both tables is ambiguous, and the reader
+  // silently prefers `bits` — which would drop a whole exact-code table
+  // without a word.
+  it('declares one reading per zone, never both', () => {
+    for (const blocklist of BLOCKLISTS) {
+      expect(blocklist.codes === undefined || blocklist.bits === undefined).toBe(true);
+    }
+  });
 });
 
 describe('checkReputation', () => {
@@ -261,6 +386,7 @@ describe('checkReputation', () => {
           target: PUBLIC_IP,
           codes: ['127.0.0.2'],
           meanings: ['SBL: a known source of spam'],
+          categories: ['spam'],
           points: 4,
           text: null,
         },
@@ -532,6 +658,27 @@ describe('checkReputation with the built-in node:dns resolver', () => {
     vi.doUnmock('node:dns/promises');
     vi.resetModules();
   });
+
+  // Regression: a batch that built a resolver per target would open one
+  // c-ares channel and one socket per row — hundreds of them for a backlog —
+  // and would re-apply the caller's servers each time. The pool exists to
+  // make a backlog cheap; a resolver per target gives that back.
+  it('builds one resolver for the whole batch', async () => {
+    const state = mockNodeDns();
+    const { checkReputationBatch: batchWithNodeDns } = await import('../src/reputation.js');
+
+    const results = await batchWithNodeDns(
+      [{ ip: PUBLIC_IP }, { ip: '8.8.4.4' }, { ip: '1.1.1.1' }],
+      [SPAMHAUS_ZEN],
+      { timeoutMs: 1_500 },
+    );
+
+    expect(state.built).toEqual([{ timeout: 1_500, tries: 1 }]);
+    expect(results.map((result) => result.listed)).toEqual([true, false, false]);
+
+    vi.doUnmock('node:dns/promises');
+    vi.resetModules();
+  });
 });
 
 /** A result carrying exactly the hits a scoring test needs. */
@@ -557,6 +704,7 @@ function hit(
     target: PUBLIC_IP,
     codes: ['127.0.0.2'],
     meanings: ['SBL: a known source of spam'],
+    categories: ['spam'],
     points: 4,
     text: null,
     ...overrides,
@@ -612,8 +760,10 @@ describe('assessReputation', () => {
 
   // The address and the domain are separate facts about separate things —
   // the machine that delivered the message, and the brand it claims — so
-  // unlike two IP lists, these do add up.
-  it('scores the address and the domain separately', () => {
+  // unlike two IP lists, these do add up. They add up to the cap and stop:
+  // eight points is not "spam twice", it is one stage settling the verdict
+  // by itself and leaving the message nothing to say in its own defence.
+  it('scores the address and the domain separately, up to the cap', () => {
     const assessment = assessReputation(
       resultWith([
         hit({}),
@@ -629,15 +779,50 @@ describe('assessReputation', () => {
       ]),
     );
 
-    expect(assessment.score).toBe(8);
+    expect(assessment.score).toBe(REPUTATION_MAX_POINTS);
     expect(assessment.isSpam).toBe(true);
     expect(assessment.reasons.map((reason) => reason.id)).toEqual([
       'reputation-ip-listed',
       'reputation-domain-listed',
     ]);
+    // The address is charged in full and the domain takes what is left, so
+    // the truncated reason is always the weaker half of the evidence.
+    expect(assessment.reasons.map((reason) => reason.points)).toEqual([4, 2]);
     expect(assessment.reasons[1]?.detail).toBe(
       'The sender domain example.com is listed by spamhaus-dbl (a phishing domain).',
     );
+  });
+
+  // A caller running its own points table — one that scores reputation
+  // alongside signals this package never sees — has to be able to turn the
+  // ceiling off rather than work backwards from a truncated number.
+  it('charges every listing in full when the cap is lifted', () => {
+    const assessment = assessReputation(
+      resultWith([
+        hit({}),
+        hit({ name: 'spamhaus-dbl', kind: 'domain', target: 'example.com', points: 4 }),
+      ]),
+      { maxPoints: Infinity },
+    );
+
+    expect(assessment.score).toBe(8);
+  });
+
+  // Regression: once the budget is spent the remaining reason must be
+  // DROPPED, not recorded at zero points. A zero-point reason reads to a user
+  // as "we found this and decided it was worth nothing", which is the
+  // opposite of what happened.
+  it('drops a reason it has no budget left for', () => {
+    const assessment = assessReputation(
+      resultWith([
+        hit({}),
+        hit({ name: 'spamhaus-dbl', kind: 'domain', target: 'example.com', points: 4 }),
+      ]),
+      { maxPoints: 4 },
+    );
+
+    expect(assessment.score).toBe(4);
+    expect(assessment.reasons.map((reason) => reason.id)).toEqual(['reputation-ip-listed']);
   });
 
   // A zone whose code this catalogue does not describe still fires; the
@@ -657,5 +842,188 @@ describe('assessReputation', () => {
       isSpam: false,
       suspicious: false,
     });
+  });
+});
+
+// The signal a lookup cannot find: how many other recipients have already
+// reported this sender. It arrives as an option because only a host holding
+// many mailboxes can count it.
+describe('assessReputation with reports from other recipients', () => {
+  it('charges a sender enough other recipients have reported', () => {
+    const assessment = assessReputation(resultWith([]), { userReports: 7 });
+
+    expect(assessment.reasons).toEqual([
+      {
+        id: 'reputation-user-reported',
+        points: USER_REPORT_POINTS,
+        detail: '7 other recipients have reported mail from example.com as spam.',
+      },
+    ]);
+    // Three points is a crowd's opinion, not an operator's observation: real
+    // evidence, and short of filing the message on its own.
+    expect(assessment.isSpam).toBe(false);
+  });
+
+  // Regression: one report is one opinion. A single reader who dislikes a
+  // newsletter must not be able to score every copy of it that arrives.
+  it('ignores a count below the minimum', () => {
+    const assessment = assessReputation(resultWith([]), { userReports: USER_REPORTS_MIN - 1 });
+
+    expect(assessment.reasons).toEqual([]);
+  });
+
+  // A host with its own sense of how trustworthy its reporters are can move
+  // the line; the sentence still has to read correctly at one report.
+  it('honours a caller minimum, down to a single report', () => {
+    const assessment = assessReputation(resultWith([]), {
+      userReports: 1,
+      minUserReports: 1,
+    });
+
+    expect(assessment.reasons[0]?.detail).toBe(
+      '1 other recipient has reported mail from example.com as spam.',
+    );
+  });
+
+  // Reports are charged last, out of whatever the listings left, so the
+  // crowd can never push a message over the stage cap on its own.
+  it('takes what the listings left of the budget', () => {
+    const assessment = assessReputation(resultWith([hit({ points: 4 })]), { userReports: 5 });
+
+    expect(assessment.score).toBe(REPUTATION_MAX_POINTS);
+    expect(assessment.reasons.map((reason) => [reason.id, reason.points])).toEqual([
+      ['reputation-ip-listed', 4],
+      ['reputation-user-reported', 2],
+    ]);
+  });
+
+  // Regression: a report is a report ABOUT a named sender. With no domain on
+  // the result there is nothing to put in the sentence, so the count is
+  // dropped rather than shown against a blank.
+  it('says nothing about a sender it cannot name', () => {
+    const assessment = assessReputation({ ...resultWith([]), domain: null }, { userReports: 9 });
+
+    expect(assessment.reasons).toEqual([]);
+  });
+});
+
+describe('checkReputationBatch', () => {
+  /** A resolver that takes a turn to answer, and remembers how many overlapped. */
+  function trackingDns(): { query: DnsQuery; peak: () => number; asked: string[] } {
+    const asked: string[] = [];
+    let inFlight = 0;
+    let peak = 0;
+
+    const query: DnsQuery = async (name) => {
+      asked.push(name);
+      inFlight += 1;
+      peak = Math.max(peak, inFlight);
+      await new Promise((resolve) => setTimeout(resolve, 1));
+      inFlight -= 1;
+      return name.startsWith(PUBLIC_IP_REVERSED) ? ['127.0.0.2'] : [];
+    };
+
+    return { query, peak: () => peak, asked };
+  }
+
+  // Regression: a caller zips these against its own rows. A result out of
+  // order, or a target silently dropped because it had nothing to ask, would
+  // attach one sender's listing to a different sender's message.
+  it('answers one result per target, in the order they were given', async () => {
+    const dns = trackingDns();
+    const results = await checkReputationBatch(
+      [{ ip: '8.8.4.4' }, { ip: PUBLIC_IP }, { ip: '10.0.0.1' }],
+      [SPAMHAUS_ZEN],
+      { query: dns.query },
+    );
+
+    expect(results.map((result) => result.ip)).toEqual(['8.8.4.4', PUBLIC_IP, null]);
+    expect(results.map((result) => result.listed)).toEqual([false, true, false]);
+    // The private address was never asked about, so its empty result is
+    // "nobody could be asked", not "nobody has anything against it".
+    expect(results[2]?.completed).toBe(false);
+  });
+
+  // THE reason the pool exists. Six zones times a few hundred backlogged rows
+  // is a thousand simultaneous queries: c-ares will not serve them, the
+  // operator reads the burst as an attack and starts answering
+  // 127.255.255.255, and a home router drops the rest on the floor.
+  it('never runs more queries at once than it was allowed', async () => {
+    const dns = trackingDns();
+    const targets = Array.from({ length: 8 }, (_, index) => ({ ip: `8.8.4.${index + 1}` }));
+
+    await checkReputationBatch(targets, [SPAMHAUS_ZEN, SPAMCOP], {
+      query: dns.query,
+      concurrency: 3,
+    });
+
+    expect(dns.asked).toHaveLength(16);
+    expect(dns.peak()).toBe(3);
+  });
+
+  it('runs several at once by default', async () => {
+    const dns = trackingDns();
+    const targets = Array.from({ length: 6 }, (_, index) => ({ ip: `8.8.4.${index + 1}` }));
+
+    await checkReputationBatch(targets, [SPAMHAUS_ZEN], { query: dns.query });
+
+    expect(dns.peak()).toBeGreaterThan(1);
+  });
+
+  // Regression: a slot count of zero read literally is a deadlock — every
+  // task waits for a slot that nothing will ever release, and the batch never
+  // settles. A caller computing concurrency from a config value can reach
+  // zero by accident, and a hang is the worst possible way to find out.
+  it('reads a concurrency below one as one rather than hanging', async () => {
+    const dns = trackingDns();
+    const results = await checkReputationBatch(
+      [{ ip: PUBLIC_IP }, { ip: '8.8.4.4' }],
+      [SPAMHAUS_ZEN],
+      { query: dns.query, concurrency: 0 },
+    );
+
+    expect(dns.peak()).toBe(1);
+    expect(results).toHaveLength(2);
+  });
+
+  it('asks nothing, and answers nothing, for an empty batch', async () => {
+    const dns = trackingDns();
+    expect(await checkReputationBatch([], BLOCKLISTS, { query: dns.query })).toEqual([]);
+    expect(dns.asked).toEqual([]);
+  });
+
+  // Regression: a batch of rows a resolver has nothing to say about — private
+  // addresses, missing domains — must not build a resolver or open a socket
+  // just to discover that.
+  it('asks nothing when no target is worth a query', async () => {
+    const dns = trackingDns();
+    const results = await checkReputationBatch(
+      [{ ip: '10.0.0.1' }, { domain: 'not a domain' }],
+      [SPAMHAUS_ZEN],
+      { query: dns.query },
+    );
+
+    expect(dns.asked).toEqual([]);
+    expect(results.map((result) => result.completed)).toEqual([false, false]);
+  });
+
+  // A domain batch is the URI-list case, and it goes through the bitmask
+  // reader end to end rather than only in the unit test above.
+  it('reads a bitmask zone through the batch', async () => {
+    const query: DnsQuery = (name) =>
+      Promise.resolve(name === 'bad.example.com.multi.surbl.org' ? ['127.0.0.24'] : []);
+
+    const results = await checkReputationBatch(
+      [{ domain: 'bad.example.com' }, { domain: 'good.example.com' }],
+      [SURBL],
+      { query, concurrency: 2 },
+    );
+
+    expect(results[0]?.hits[0]).toMatchObject({
+      name: 'surbl',
+      categories: ['phishing', 'malware'],
+      points: 4,
+    });
+    expect(results[1]?.listed).toBe(false);
   });
 });

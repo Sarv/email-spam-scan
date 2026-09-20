@@ -44,17 +44,47 @@
  */
 import ipaddr from 'ipaddr.js';
 
+import { reasonFrom } from './cause.js';
+import { nodeDnsQuery, type DnsQuery, type DnsResolverOptions } from './dns.js';
 import { isPublicIp, normalizeIp } from './headers/origin-ip.js';
-import { assessmentOf, type SpamAssessment, type SpamReason } from './verdict.js';
+import {
+  assessmentOf,
+  SPAM_THRESHOLD,
+  type SpamAssessment,
+  type SpamReason,
+  type SpamReasonId,
+} from './verdict.js';
 
 /** Whether a zone is queried with an IP address or with a domain name. */
 export type BlocklistKind = 'ip' | 'domain';
+
+/**
+ * What KIND of accusation a return code is, across zones.
+ *
+ * Operators each publish their own code table, so `127.0.0.4` from one zone
+ * and `127.0.1.5` from another are the same fact written twice. A consumer
+ * that wants to say "this sender is a compromised machine" — to group hits, to
+ * decide whether to quarantine rather than file, or to apply its own points
+ * table — needs that fact, and deriving it from the code would mean copying
+ * the catalogue back out of this package.
+ *
+ * `abused` is the one worth reading twice: a cracked WordPress install or a
+ * hijacked shortener is listed, and the domain's owner is a victim rather than
+ * the sender. It is deliberately cheap.
+ *
+ * A code with no category is not an error — it is a listing whose kind this
+ * catalogue does not claim to know, and it still scores.
+ */
+export type BlocklistCategory =
+  'spam' | 'exploited' | 'phishing' | 'malware' | 'botnet' | 'policy' | 'abused' | 'grey';
 
 /** What one return code from one zone means, and what it is worth. */
 export interface BlocklistCode {
   /** The operator's own description, shown to a reader as part of the reason. */
   meaning: string;
   points: number;
+  /** The kind of accusation, for a consumer that groups hits across zones. */
+  category?: BlocklistCategory;
 }
 
 /** A zone to query, and how to read what it answers. */
@@ -70,7 +100,30 @@ export interface Blocklist {
    * it zero would silently ignore the newest category a list publishes.
    */
   points: number;
+  /**
+   * The zone's published table, read by exact return code. Spamhaus and
+   * SpamCop answer this way: one address per category.
+   */
   codes?: Readonly<Record<string, BlocklistCode>>;
+  /**
+   * The zone's published table, read as a BITMASK in the last octet — the
+   * other convention, and the one the URI lists use. SURBL answers
+   * `127.0.0.24` for a domain that is both phishing (8) and malware (16), and
+   * there is no code table on earth that can enumerate the combinations. A
+   * zone declares one or the other; `bits` wins where both are set.
+   */
+  bits?: Readonly<Record<number, BlocklistCode>>;
+  /**
+   * Answers that mean the OPERATOR declined, published outside
+   * `127.255.255.0/24`. The URI lists answer `127.0.0.1` to a query from a
+   * public resolver or from a querier over the free-use limit, which is a
+   * refusal wearing the clothes of a listing — scoring it would put every
+   * sender on a blocklist the moment a resolver was misconfigured.
+   *
+   * A refusal is only read as one when nothing in the same answer is a
+   * listing, so a zone that returns both still reports the listing.
+   */
+  refusals?: Readonly<Record<string, string>>;
 }
 
 /** One zone's answer about one address or domain, when that answer is a listing. */
@@ -84,6 +137,8 @@ export interface BlocklistHit {
   codes: string[];
   /** What the catalogue says those codes mean. Empty when it describes none. */
   meanings: string[];
+  /** The kinds of accusation those codes carry. Empty when none is described. */
+  categories: BlocklistCategory[];
   /** The most any one of the returned codes is worth. */
   points: number;
   /** The zone's `TXT` record, when `includeText` asked for one. */
@@ -114,33 +169,30 @@ export interface ReputationTarget {
   domain?: string | null;
 }
 
-/**
- * A DNS query.
- *
- * Supply one to use a cache, a DoH client, your own resolver pool, or — the
- * reason it exists — a fixture in a test that must never touch a real one.
- *
- * The contract differs from `node:dns` in one deliberate way: **a name that
- * does not exist resolves to an empty array**, and a throw means the lookup
- * genuinely failed. That is the distinction the whole stage turns on, so it
- * is made once, at the boundary, rather than by every caller guessing at
- * resolver error codes.
- */
-export type DnsQuery = (name: string, recordType: 'A' | 'TXT') => Promise<string[]>;
+/** The shared DNS boundary, re-exported so this entry stands on its own. */
+export type { DnsQuery, DnsRecordType, DnsResolverOptions } from './dns.js';
 
-export interface ReputationOptions {
-  /** Per-query timeout for the built-in resolver. Default 5000ms. */
-  timeoutMs?: number;
+export interface ReputationOptions extends DnsResolverOptions {
   /**
    * Also fetch each hit's `TXT` record, which is where operators put the
    * human explanation and the delisting URL. Off by default: it doubles the
    * queries, and it is only worth asking once something is listed.
    */
   includeText?: boolean;
-  /** Nameservers for the built-in resolver. Defaults to the system's. */
-  servers?: readonly string[];
   /** Your own lookup, in place of `node:dns`. */
   query?: DnsQuery;
+}
+
+export interface ReputationBatchOptions extends ReputationOptions {
+  /**
+   * How many queries may be in flight across the whole batch. Default 8.
+   *
+   * It is a courtesy limit before it is a performance one: the free mirrors
+   * are rate-limited per querier, and a burst is how a resolver earns a
+   * `127.255.255.255` for everything that follows. Values below 1 are read as
+   * 1 rather than deadlocking.
+   */
+  concurrency?: number;
 }
 
 export interface ReputationResult {
@@ -183,15 +235,47 @@ export const SPAMHAUS_ZEN: Blocklist = {
   kind: 'ip',
   points: 3,
   codes: {
-    '127.0.0.2': { meaning: 'SBL: a known source of spam', points: 4 },
-    '127.0.0.3': { meaning: 'SBL CSS: an automated snowshoe-spam listing', points: 3 },
-    '127.0.0.4': { meaning: 'XBL: an exploited or compromised machine', points: 4 },
-    '127.0.0.5': { meaning: 'XBL: an exploited or compromised machine', points: 4 },
-    '127.0.0.6': { meaning: 'XBL: an exploited or compromised machine', points: 4 },
-    '127.0.0.7': { meaning: 'XBL: an exploited or compromised machine', points: 4 },
-    '127.0.0.9': { meaning: 'DROP: a hijacked or spam-operated netblock', points: 4 },
-    '127.0.0.10': { meaning: 'PBL: an address that should not deliver mail directly', points: 2 },
-    '127.0.0.11': { meaning: 'PBL: an address that should not deliver mail directly', points: 2 },
+    '127.0.0.2': { meaning: 'SBL: a known source of spam', points: 4, category: 'spam' },
+    '127.0.0.3': {
+      meaning: 'SBL CSS: an automated snowshoe-spam listing',
+      points: 3,
+      category: 'spam',
+    },
+    '127.0.0.4': {
+      meaning: 'XBL: an exploited or compromised machine',
+      points: 4,
+      category: 'exploited',
+    },
+    '127.0.0.5': {
+      meaning: 'XBL: an exploited or compromised machine',
+      points: 4,
+      category: 'exploited',
+    },
+    '127.0.0.6': {
+      meaning: 'XBL: an exploited or compromised machine',
+      points: 4,
+      category: 'exploited',
+    },
+    '127.0.0.7': {
+      meaning: 'XBL: an exploited or compromised machine',
+      points: 4,
+      category: 'exploited',
+    },
+    '127.0.0.9': {
+      meaning: 'DROP: a hijacked or spam-operated netblock',
+      points: 4,
+      category: 'exploited',
+    },
+    '127.0.0.10': {
+      meaning: 'PBL: an address that should not deliver mail directly',
+      points: 2,
+      category: 'policy',
+    },
+    '127.0.0.11': {
+      meaning: 'PBL: an address that should not deliver mail directly',
+      points: 2,
+      category: 'policy',
+    },
   },
 };
 
@@ -208,15 +292,39 @@ export const SPAMHAUS_DBL: Blocklist = {
   kind: 'domain',
   points: 3,
   codes: {
-    '127.0.1.2': { meaning: 'a spam domain', points: 4 },
-    '127.0.1.4': { meaning: 'a phishing domain', points: 4 },
-    '127.0.1.5': { meaning: 'a malware domain', points: 4 },
-    '127.0.1.6': { meaning: 'a botnet command-and-control domain', points: 4 },
-    '127.0.1.102': { meaning: 'a legitimate domain abused to send spam', points: 2 },
-    '127.0.1.103': { meaning: 'a redirector abused to send spam', points: 2 },
-    '127.0.1.104': { meaning: 'a legitimate domain abused for phishing', points: 2 },
-    '127.0.1.105': { meaning: 'a legitimate domain abused for malware', points: 2 },
-    '127.0.1.106': { meaning: 'a legitimate domain abused by a botnet', points: 2 },
+    '127.0.1.2': { meaning: 'a spam domain', points: 4, category: 'spam' },
+    '127.0.1.4': { meaning: 'a phishing domain', points: 4, category: 'phishing' },
+    '127.0.1.5': { meaning: 'a malware domain', points: 4, category: 'malware' },
+    '127.0.1.6': {
+      meaning: 'a botnet command-and-control domain',
+      points: 4,
+      category: 'botnet',
+    },
+    '127.0.1.102': {
+      meaning: 'a legitimate domain abused to send spam',
+      points: 2,
+      category: 'abused',
+    },
+    '127.0.1.103': {
+      meaning: 'a redirector abused to send spam',
+      points: 2,
+      category: 'abused',
+    },
+    '127.0.1.104': {
+      meaning: 'a legitimate domain abused for phishing',
+      points: 2,
+      category: 'abused',
+    },
+    '127.0.1.105': {
+      meaning: 'a legitimate domain abused for malware',
+      points: 2,
+      category: 'abused',
+    },
+    '127.0.1.106': {
+      meaning: 'a legitimate domain abused by a botnet',
+      points: 2,
+      category: 'abused',
+    },
   },
 };
 
@@ -227,7 +335,90 @@ export const SPAMCOP: Blocklist = {
   kind: 'ip',
   points: 3,
   codes: {
-    '127.0.0.2': { meaning: 'reported by recipients as a source of spam', points: 3 },
+    '127.0.0.2': {
+      meaning: 'reported by recipients as a source of spam',
+      points: 3,
+      category: 'spam',
+    },
+  },
+};
+
+/**
+ * Barracuda Reputation — one code, like SpamCop, and read the same way.
+ *
+ * The catch is not in the answer but in who may ask: the public mirror serves
+ * only resolvers whose address has been registered at
+ * https://www.barracudacentral.org/account/register. An unregistered querier
+ * is answered NXDOMAIN — "not listed" — for every address, so this zone
+ * silently contributes nothing until that registration exists. It is in the
+ * catalogue because a mail host that has registered wants it, not because it
+ * is free to switch on.
+ */
+export const BARRACUDA: Blocklist = {
+  name: 'barracuda',
+  zone: 'b.barracudacentral.org',
+  kind: 'ip',
+  points: 3,
+  codes: {
+    '127.0.0.2': {
+      meaning: 'listed by Barracuda Reputation as a source of spam',
+      points: 3,
+      category: 'spam',
+    },
+  },
+};
+
+/**
+ * SURBL — the domains found INSIDE messages, not the ones that sent them.
+ *
+ * The first of the two bitmask zones. A domain that is both a phishing site
+ * and a malware host comes back as `127.0.0.24`, and the answer has to be read
+ * bit by bit; an exact-code table would have to enumerate every combination
+ * and would score the combined answer as an unrecognised listing.
+ *
+ * Free use is for low volume and requires your own resolver: a query arriving
+ * from a public resolver is answered `127.0.0.1`, which `refusals` keeps out
+ * of the score. See https://surbl.org/usage-policy.
+ */
+export const SURBL: Blocklist = {
+  name: 'surbl',
+  zone: 'multi.surbl.org',
+  kind: 'domain',
+  points: 3,
+  bits: {
+    8: { meaning: 'a phishing domain', points: 4, category: 'phishing' },
+    16: { meaning: 'a malware domain', points: 4, category: 'malware' },
+    64: { meaning: 'a cracked site being used to serve spam', points: 3, category: 'abused' },
+    128: { meaning: 'a domain advertised in spam', points: 4, category: 'spam' },
+  },
+  refusals: {
+    '127.0.0.1': 'the zone declined the query, which is what it answers a public resolver',
+  },
+};
+
+/**
+ * URIBL — the other URI list, and the other bitmask.
+ *
+ * `grey` is the reason the bits matter: URIBL's grey list is bulk senders of
+ * dubious value rather than spam, and at 2 points it is a nudge, not a
+ * verdict. Reading a grey listing as "listed" would file legitimate marketing
+ * mail as spam on one list's opinion.
+ *
+ * Free use is capped by volume and by querier; over the limit, or through a
+ * public resolver, the answer is `127.0.0.1`. See https://uribl.com/about.shtml.
+ */
+export const URIBL: Blocklist = {
+  name: 'uribl',
+  zone: 'multi.uribl.com',
+  kind: 'domain',
+  points: 3,
+  bits: {
+    2: { meaning: 'URIBL black: a domain sent in spam', points: 4, category: 'spam' },
+    4: { meaning: 'URIBL grey: a bulk sender of dubious value', points: 2, category: 'grey' },
+    8: { meaning: 'URIBL red: a domain seen in a live spam run', points: 4, category: 'spam' },
+  },
+  refusals: {
+    '127.0.0.1': 'the zone refused the query, which is what it answers over the free-use limit',
   },
 };
 
@@ -235,7 +426,14 @@ export const SPAMCOP: Blocklist = {
  * The zones this package describes. NOT a default — nothing queries any of
  * them until a caller names it, which is the whole point of the entry.
  */
-export const BLOCKLISTS: readonly Blocklist[] = [SPAMHAUS_ZEN, SPAMHAUS_DBL, SPAMCOP];
+export const BLOCKLISTS: readonly Blocklist[] = [
+  SPAMHAUS_ZEN,
+  SPAMHAUS_DBL,
+  SPAMCOP,
+  BARRACUDA,
+  SURBL,
+  URIBL,
+];
 
 /**
  * `127.255.255.0/24` — the operator talking to YOU, not answering about the
@@ -256,7 +454,38 @@ const MAX_DOMAIN_LENGTH = 253;
 
 const DOMAIN_PATTERN = /^[a-z0-9](?:[a-z0-9-]*[a-z0-9])?(?:\.[a-z0-9](?:[a-z0-9-]*[a-z0-9])?)+$/;
 
-const DEFAULT_TIMEOUT_MS = 5_000;
+/** Queries in flight across a batch, when the caller does not say. */
+const DEFAULT_CONCURRENCY = 8;
+
+/**
+ * The most the whole reputation stage may add to a message by default.
+ *
+ * `SPAM_THRESHOLD + 1`: enough that a listed sender is spam on this evidence
+ * alone, and no more. Without a cap an address listed by one zone and a
+ * domain listed by another reach eight points, which is not "spam twice" —
+ * it is one stage deciding the verdict on its own and leaving no room for
+ * the message itself to disagree.
+ */
+export const REPUTATION_MAX_POINTS = SPAM_THRESHOLD + 1;
+
+/**
+ * How many other recipients must have reported a sender before it counts.
+ *
+ * Three. One report is one opinion — a reader who finds a newsletter
+ * annoying reports it, and that is a fact about the reader. Three
+ * independent ones are the smallest number that says something about the
+ * sender instead.
+ */
+export const USER_REPORTS_MIN = 3;
+
+/**
+ * What a sender other recipients are reporting is worth.
+ *
+ * Three: real evidence, and deliberately short of the threshold on its own.
+ * A crowd's opinion is not an operator's observation, and a crowd can be
+ * confidently wrong about a sender it merely dislikes.
+ */
+export const USER_REPORT_POINTS = 3;
 
 /**
  * The label an address is queried under: its octets, reversed.
@@ -306,6 +535,8 @@ export interface CodeReading {
   /** The returned codes that are genuinely a listing. */
   listings: string[];
   meanings: string[];
+  /** The kinds of accusation those codes carry, where the table names one. */
+  categories: BlocklistCategory[];
   /** The most any one listing code is worth. Zero when nothing was listed. */
   points: number;
   /** Set when the answer was not about the address at all. */
@@ -322,7 +553,7 @@ export interface CodeReading {
  * either way it is not evidence about the sender.
  */
 export function readBlocklistCodes(blocklist: Blocklist, codes: readonly string[]): CodeReading {
-  const nothing = { listings: [], meanings: [], points: 0 };
+  const nothing = { listings: [], meanings: [], categories: [], points: 0 };
 
   const complaints = codes.filter((code) => code.startsWith(OPERATOR_ERROR_PREFIX));
   if (complaints.length > 0) {
@@ -335,19 +566,54 @@ export function readBlocklistCodes(blocklist: Blocklist, codes: readonly string[
   const listings = codes.filter(isListingCode);
   if (listings.length === 0) {
     if (codes.length === 0) return { ...nothing, error: null };
+    // A zone that publishes its refusal inside 127.0.0.0/8 gets to say so in
+    // its own words; everything else is a wildcard or a hijacked answer.
+    const refused = codes.flatMap((code) => blocklist.refusals?.[code] ?? []);
+    if (refused.length > 0) return { ...nothing, error: [...new Set(refused)].join('; ') };
     return {
       ...nothing,
       error: `the zone answered ${codes.join(', ')}, which is not a listing`,
     };
   }
 
-  const described = listings.map((code) => blocklist.codes?.[code]);
+  const described = describeListings(blocklist, listings);
   return {
     listings,
     meanings: described.flatMap((code) => (code === undefined ? [] : [code.meaning])),
+    categories: described.flatMap((code) => (code?.category === undefined ? [] : [code.category])),
     points: Math.max(...described.map((code) => code?.points ?? blocklist.points)),
     error: null,
   };
+}
+
+/**
+ * What the zone's table says about the codes that came back.
+ *
+ * `undefined` in the result is not a failure: it is a listing the table does
+ * not describe, which still scores the zone's own `points` rather than
+ * nothing. Operators add codes faster than catalogues are updated, and a new
+ * category must not arrive as an all-clear.
+ */
+function describeListings(
+  blocklist: Blocklist,
+  listings: readonly string[],
+): (BlocklistCode | undefined)[] {
+  const { bits } = blocklist;
+  if (bits === undefined) return listings.map((code) => blocklist.codes?.[code]);
+
+  // A bitmask zone may answer with several records OR with one combined
+  // octet, and they mean the same thing — so OR them together and read the
+  // bits, rather than looking up either form as an address.
+  const mask = listings.reduce((total, code) => total | lastOctet(code), 0);
+  const matched = Object.entries(bits).flatMap(([bit, described]) =>
+    (mask & Number(bit)) === 0 ? [] : [described],
+  );
+  return matched.length > 0 ? matched : [undefined];
+}
+
+/** The last label of a dotted quad as a number. Unreadable reads as 0, which matches no bit. */
+function lastOctet(code: string): number {
+  return Number(code.split('.').pop()) | 0;
 }
 
 /**
@@ -364,52 +630,6 @@ interface Outcome {
   blocklist: Blocklist;
   hit: BlocklistHit | null;
   error: string | null;
-}
-
-type NodeResolver = {
-  setServers: (servers: string[]) => void;
-  resolve4: (name: string) => Promise<string[]>;
-  resolveTxt: (name: string) => Promise<string[][]>;
-};
-
-type ResolverConstructor = new (options?: { timeout?: number; tries?: number }) => NodeResolver;
-
-/** A name that does not exist is the ordinary answer, and it is not an error. */
-function isNameNotFound(cause: unknown): boolean {
-  const code = (cause as { code?: unknown } | null | undefined)?.code;
-  return code === 'ENOTFOUND' || code === 'ENODATA';
-}
-
-/**
- * The built-in resolver: one `node:dns` resolver per call, reused across the
- * zones, with the timeout enforced by c-ares rather than by a race that leaves
- * the query running.
- *
- * `tries: 1` because a blocklist answer that needed a retry has already cost
- * more than it is worth at ingest — the message still has to be delivered.
- */
-async function nodeDnsQuery(options: ReputationOptions): Promise<DnsQuery> {
-  const { Resolver } = (await import('node:dns/promises')) as unknown as {
-    Resolver: ResolverConstructor;
-  };
-  const resolver = new Resolver({ timeout: options.timeoutMs ?? DEFAULT_TIMEOUT_MS, tries: 1 });
-  if (options.servers !== undefined && options.servers.length > 0) {
-    resolver.setServers([...options.servers]);
-  }
-
-  return async (name, recordType) => {
-    try {
-      if (recordType === 'A') return await resolver.resolve4(name);
-      return (await resolver.resolveTxt(name)).map((chunks) => chunks.join(''));
-    } catch (cause) {
-      if (isNameNotFound(cause)) return [];
-      throw cause;
-    }
-  };
-}
-
-function reasonFrom(cause: unknown): string {
-  return cause instanceof Error ? cause.message : String(cause);
 }
 
 async function lookupOne(
@@ -440,6 +660,7 @@ async function lookupOne(
       target,
       codes: reading.listings,
       meanings: reading.meanings,
+      categories: reading.categories,
       points: reading.points,
       text: options.includeText === true ? await explanationFor(name, query) : null,
     },
@@ -483,6 +704,55 @@ export async function checkReputation(
   blocklists: readonly Blocklist[],
   options: ReputationOptions = {},
 ): Promise<ReputationResult> {
+  const plan = planLookups(target, blocklists);
+  if (plan.jobs.length === 0) return nothingAsked(plan);
+
+  const query = options.query ?? (await nodeDnsQuery(options));
+  return runPlan(plan, query, unlimited, options);
+}
+
+/**
+ * Ask about many targets at once, over one resolver and a bounded number of
+ * queries in flight.
+ *
+ * WHY THIS EXISTS RATHER THAN A LOOP. A caller with a backlog — a mailbox
+ * being scored after the fact, a queue drained on a timer — has hundreds of
+ * addresses and six zones, and the two obvious shapes are both wrong.
+ * Sequential is an hour of DNS round-trips; `Promise.all` over the lot opens
+ * a thousand simultaneous queries, which c-ares will not serve, the operator
+ * will read as an attack, and a home router will drop on the floor. The pool
+ * is the only version that finishes and stays welcome.
+ *
+ * Results come back in the order the targets were given, so a caller can zip
+ * them against its own rows. Like `checkReputation` it never rejects: a
+ * target nobody could be asked about is a result with `completed: false`.
+ */
+export async function checkReputationBatch(
+  targets: readonly ReputationTarget[],
+  blocklists: readonly Blocklist[],
+  options: ReputationBatchOptions = {},
+): Promise<ReputationResult[]> {
+  const plans = targets.map((target) => planLookups(target, blocklists));
+  if (plans.every((plan) => plan.jobs.length === 0)) return plans.map(nothingAsked);
+
+  const query = options.query ?? (await nodeDnsQuery(options));
+  const limit = limiterFor(options.concurrency ?? DEFAULT_CONCURRENCY);
+  return Promise.all(
+    plans.map((plan) =>
+      plan.jobs.length === 0 ? nothingAsked(plan) : runPlan(plan, query, limit, options),
+    ),
+  );
+}
+
+/** One target's usable values and the queries they turn into. */
+interface LookupPlan {
+  ip: string | null;
+  domain: string | null;
+  jobs: { blocklist: Blocklist; target: string; name: string }[];
+}
+
+/** Which zones can actually be asked about this target, and under what name. */
+function planLookups(target: ReputationTarget, blocklists: readonly Blocklist[]): LookupPlan {
   const ip = queryableIp(target.ip);
   const domain = normalizeQueryDomain(target.domain);
 
@@ -492,13 +762,35 @@ export async function checkReputation(
     return value === null || name === null ? [] : [{ blocklist, target: value, name }];
   });
 
-  if (jobs.length === 0) {
-    return { ip, domain, listed: false, hits: [], checked: [], errors: [], completed: false };
-  }
+  return { ip, domain, jobs };
+}
 
-  const query = options.query ?? (await nodeDnsQuery(options));
+/**
+ * Nothing was asked, so nothing is known. `completed: false` is the whole
+ * point: an empty `hits` here must never read as an all-clear.
+ */
+function nothingAsked(plan: LookupPlan): ReputationResult {
+  return {
+    ip: plan.ip,
+    domain: plan.domain,
+    listed: false,
+    hits: [],
+    checked: [],
+    errors: [],
+    completed: false,
+  };
+}
+
+async function runPlan(
+  plan: LookupPlan,
+  query: DnsQuery,
+  limit: Limiter,
+  options: ReputationOptions,
+): Promise<ReputationResult> {
   const outcomes = await Promise.all(
-    jobs.map((job) => lookupOne(job.blocklist, job.target, job.name, query, options)),
+    plan.jobs.map((job) =>
+      limit(() => lookupOne(job.blocklist, job.target, job.name, query, options)),
+    ),
   );
 
   const hits = outcomes.flatMap((outcome) => (outcome.hit === null ? [] : [outcome.hit]));
@@ -509,8 +801,8 @@ export async function checkReputation(
   );
 
   return {
-    ip,
-    domain,
+    ip: plan.ip,
+    domain: plan.domain,
     listed: hits.length > 0,
     hits,
     checked: outcomes.flatMap((outcome) =>
@@ -519,6 +811,64 @@ export async function checkReputation(
     errors,
     completed: errors.length === 0,
   };
+}
+
+/** Runs a task, perhaps after waiting for a slot. */
+type Limiter = <T>(task: () => Promise<T>) => Promise<T>;
+
+/** One target's worth of queries is already a handful; nothing to schedule. */
+const unlimited: Limiter = (task) => task();
+
+/**
+ * A slot counter with a FIFO queue of waiters.
+ *
+ * Hand-rolled rather than depending on `p-limit`, and deliberately: it is
+ * nine lines, it is the only scheduling this package does, and a reputation
+ * entry that costs a browser bundle `ipaddr.js` and nothing else is a
+ * promise worth keeping.
+ */
+function limiterFor(concurrency: number): Limiter {
+  const slots = Math.max(1, Math.floor(concurrency));
+  const waiting: (() => void)[] = [];
+  let active = 0;
+
+  return async <T>(task: () => Promise<T>): Promise<T> => {
+    if (active >= slots) await new Promise<void>((resolve) => waiting.push(resolve));
+    active += 1;
+    try {
+      return await task();
+    } finally {
+      active -= 1;
+      // Hand the slot to the next waiter rather than letting it re-check, so
+      // a queue cannot stall behind a task that finished while it slept.
+      const next = waiting.shift();
+      if (next !== undefined) next();
+    }
+  };
+}
+
+export interface AssessReputationOptions {
+  /**
+   * The ceiling on everything this stage adds together. Default
+   * `REPUTATION_MAX_POINTS`. Pass `Infinity` to score each listing in full.
+   */
+  maxPoints?: number;
+  /**
+   * How many OTHER recipients have reported mail from this sender's domain as
+   * spam, if the caller is a host that counts such things.
+   *
+   * An option rather than something the lookup produces, because nothing here
+   * can discover it: it comes from whoever holds the mailboxes, not from the
+   * DNS. Ignored when the result carries no domain — a report is a report
+   * about a named sender, and with no name to put to it there is nothing to
+   * tell the reader.
+   */
+  userReports?: number;
+  /**
+   * Reports needed before they are charged for. Default
+   * {@link USER_REPORTS_MIN}.
+   */
+  minUserReports?: number;
 }
 
 const REPUTATION_RULES = [
@@ -539,9 +889,28 @@ const REPUTATION_RULES = [
  * A listing is scored whether or not the run `completed` — a zone that
  * answered told the truth about what it holds, whatever happened to the
  * zone next to it.
+ *
+ * `options.userReports` adds the one piece of evidence a lookup cannot find:
+ * how many other recipients have already reported this sender. It is charged
+ * last, out of whatever the listings left.
  */
-export function assessReputation(result: ReputationResult): SpamAssessment {
+export function assessReputation(
+  result: ReputationResult,
+  options: AssessReputationOptions = {},
+): SpamAssessment {
+  const budget = options.maxPoints ?? REPUTATION_MAX_POINTS;
   const reasons: SpamReason[] = [];
+  let spent = 0;
+
+  // The address is charged first, the domain takes what is left of the budget
+  // and the reports take what is left after that, so the reason that gets
+  // truncated is always the weaker half of the evidence.
+  const charge = (id: SpamReasonId, points: number, detail: string): void => {
+    const charged = Math.min(points, budget - spent);
+    if (charged <= 0) return;
+    spent += charged;
+    reasons.push({ id, points: charged, detail });
+  };
 
   for (const rule of REPUTATION_RULES) {
     const hits = result.hits.filter((hit) => hit.kind === rule.kind);
@@ -552,11 +921,21 @@ export function assessReputation(result: ReputationResult): SpamAssessment {
     const others = hits.length - 1;
     const rest = others > 0 ? ` and ${others} other blocklist${others === 1 ? '' : 's'}` : '';
 
-    reasons.push({
-      id: rule.id,
-      points: worst.points,
-      detail: `${rule.subject} ${worst.target} is listed by ${worst.name}${meaning}${rest}.`,
-    });
+    charge(
+      rule.id,
+      worst.points,
+      `${rule.subject} ${worst.target} is listed by ${worst.name}${meaning}${rest}.`,
+    );
+  }
+
+  const reports = options.userReports ?? 0;
+  if (result.domain !== null && reports >= (options.minUserReports ?? USER_REPORTS_MIN)) {
+    const who = reports === 1 ? 'recipient has' : 'recipients have';
+    charge(
+      'reputation-user-reported',
+      USER_REPORT_POINTS,
+      `${reports} other ${who} reported mail from ${result.domain} as spam.`,
+    );
   }
 
   return assessmentOf(reasons);

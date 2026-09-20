@@ -501,6 +501,7 @@ describe('scan with a reputation assessment', () => {
         target: '93.184.216.34',
         codes: ['127.0.0.2'],
         meanings: ['SBL: a known source of spam'],
+        categories: ['spam'],
         points: 4,
         text: null,
       },
