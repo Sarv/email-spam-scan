@@ -14,7 +14,7 @@ export {
   type ContentSignalInput,
 } from './rules.js';
 export { collapseWhitespace, extractHtml, type HtmlAnchor, type HtmlExtract } from './html-text.js';
-export { ownWords } from './quote.js';
+export { ownWords, stripQuotedTail, QUOTE_MARKERS } from './quote.js';
 export {
   containsPhrase,
   matchSpamVocabulary,

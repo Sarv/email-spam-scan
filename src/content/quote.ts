@@ -1,6 +1,6 @@
 /**
- * The sender's own words, out of a plain-text body that may carry a whole
- * thread below them.
+ * Where somebody else's email begins — and, above it, the words this sender
+ * actually typed.
  *
  * WHY THIS MATTERS TO A SCORE. Content rules charge points for what the sender
  * wrote. Score the quoted history too and a thread gets worse every time
@@ -10,10 +10,26 @@
  * is not which words appeared in the file — it is which words this sender
  * chose.
  *
+ * TWO CUTS, ONE CORPUS. The markers below answer one question, and two callers
+ * ask it for opposite reasons:
+ *
+ *   * {@link stripQuotedTail} — everything above the quoted history, SIGNATURE
+ *     INCLUDED. Contact mining wants precisely that: the sign-off is the part
+ *     worth reading, and the only thing that must go is the sign-off belonging
+ *     to the person being replied to.
+ *   * {@link ownWords} — the same cut, then the signature and the client footer
+ *     removed as well, because a scorer must not charge a sender for the phone
+ *     number under their own name or for "Sent from my iPhone".
+ *
+ * They were two implementations in two repositories until they were folded
+ * together here, which is the failure this module exists to prevent: a second
+ * copy of a marker list drifts, and the drift is invisible — both copies go on
+ * returning a plausible string.
+ *
  * WHY IT IS HAND-WRITTEN. `email-reply-parser` (the JavaScript port of
  * GitHub's) is the mature library for this job and was the first choice. It is
  * ESM-only and declares `engines: node >= 22`, and this package publishes a
- * CommonJS build and supports Node 18 — a `require()` of it throws
+ * CommonJS build and supports Node 20 — a `require()` of it throws
  * `ERR_REQUIRE_ESM` on every Node below 22, in the consumer's process, at run
  * time. Taking it would mean either breaking that promise or bundling somebody
  * else's code into ours. What is left is small and specified: RFC 3676 §4.3
@@ -25,47 +41,59 @@
  */
 
 /**
- * The last line of the attribution above quoted history: anything ending in
- * `wrote:`.
+ * Everything that opens quoted or forwarded history. The cut is at the FIRST
+ * one that matches, so each pattern must match at the true beginning of the
+ * quoted block — not in the middle of it, and never in the sender's own prose:
+ * a false match here DELETES the sender's words, silently, and in the
+ * direction that loses signal.
  *
- * Deliberately not `on .* wrote:` on one line, because the date between them
- * wraps — Gmail emits "On Tue, 3 Mar 2026 at 09:14, Alice <a@b.com>" and
- * "wrote:" as two separate lines, and matching only the joined form leaves the
- * whole quoted thread in the sender's own words.
- */
-const ATTRIBUTION_END = /\bwrote:\s*$/i;
-
-/**
- * The FIRST line of that attribution, when it wrapped: "On <a date>, ...".
- * Recognised only so it can be removed along with the `wrote:` line it belongs
- * to — never on its own, where "On 3 July we shipped 40 units" is an ordinary
- * sentence. Requiring a digit keeps it to something with a date in it.
- */
-const ATTRIBUTION_START = /^\s*on\b.+\d/i;
-
-/**
- * Lines that begin the quoted history. Everything from the first match on is
- * somebody else's writing.
+ * Several are deliberately not anchored to the end of a line. These patterns
+ * run on `html-to-text` output as well as on `text/plain`, and that converter
+ * routinely collapses a whole reply chain onto a single line — a marker that
+ * assumes it sits alone on one misses the longest threads, which are exactly
+ * the ones carrying the most of somebody else's words.
  *
- * Each is anchored and requires the shape the client actually emits, because a
- * false match here DELETES the sender's own words from the scan — silently,
- * and in the direction that loses signal.
- *
- *   `On <date> <someone> wrote:`     Gmail, Apple Mail, Thunderbird, most others
- *   `<someone> wrote:`               the same attribution wrapped onto one line
- *   `-----Original Message-----`     Outlook, and every client that copied it
- *   `________________________`       Outlook's horizontal rule above the history
- *   `From: …`                        the header block Outlook writes instead
- *   `> …`                            the RFC 3676 quote prefix itself
- *   `Sent from my …`                 not history, but not prose either
+ * None carries the `g` flag, so `exec` here is stateless and the array is safe
+ * to share between callers and to export.
  */
-const QUOTE_START_PATTERNS: readonly RegExp[] = [
-  ATTRIBUTION_END,
-  /^\s*-{2,}\s*original message\s*-{2,}\s*$/i,
-  /^\s*-{2,}\s*forwarded message\s*-{2,}\s*$/i,
-  /^\s*_{5,}\s*$/,
-  /^\s*from:\s+\S/i,
-  /^\s*>/,
+export const QUOTE_MARKERS: readonly RegExp[] = [
+  // "On <date>, <name> <addr> wrote:" — Gmail, Apple Mail, Thunderbird and
+  // most of the rest. The span reaches across newlines because the attribution
+  // wraps (Gmail puts a bare "wrote:" on the next line), and it is bounded and
+  // lazy so it cannot backtrack pathologically over a long body.
+  /^On\b[\s\S]{1,300}?\bwrote:/m,
+  // The same attribution when it is NOT at the start of a line, which is what
+  // `html-to-text` leaves behind: "... review this today. On Wed, Jul 29, 2026
+  // at 12:05 PM, Bindu <b@x.com> wrote: ...". A weekday or a digit after "On"
+  // is what keeps ordinary prose ("he wrote:") out.
+  /\bOn\s+(?:Mon|Tue|Wed|Thu|Fri|Sat|Sun|\d)[\s\S]{1,300}?\bwrote:/i,
+  // An attribution that does not open with "On" — "Alice Smith
+  // <alice@example.com> wrote:" — including the wrapped form where "wrote:"
+  // sits alone on the line below. An address or a date somewhere on the line
+  // is required, and that requirement is the whole guard: without it this also
+  // matches "here is what the auditor wrote:" and throws away everything the
+  // sender typed under it. Both halves are bounded, as above.
+  /^[^\n]{0,200}[@\d][^\n]{0,200}\s*wrote:\s*$/m,
+  // The same line in the languages the clients localise it into.
+  /^Le\s.+\sa\s[ée]crit\s*:\s*$/m,
+  /^Am\s.+\sschrieb\s.+:\s*$/m,
+  /^El\s.+\sescribi[óo]:\s*$/m,
+  // Outlook's separators, and every client that copied them.
+  /^\s*-{2,}\s*original message\s*-{2,}\s*$/im,
+  /^\s*-{2,}\s*forwarded message\s*-{2,}/im,
+  /^\s*begin forwarded message:\s*$/im,
+  // Outlook's horizontal rule above the history. Long by design: Outlook draws
+  // about thirty characters, whereas a rule somebody typed above their OWN
+  // sign-off is shorter — and cutting at that one would throw away the
+  // signature this text was stripped to find.
+  /^_{20,}\s*$/m,
+  // The header block Outlook writes where other clients write an attribution.
+  // The second header line is required: a lone "From:" also opens ordinary
+  // prose and a ticket system's quoted metadata.
+  /^From:[^\n]+\n\s*(?:To|Sent|Date|Subject|Cc):/im,
+  // RFC 3676 §4.5, the quote prefix itself. Leading whitespace is allowed — a
+  // client that indents the quote has still quoted.
+  /^\s*>/m,
 ];
 
 /**
@@ -84,37 +112,47 @@ const MOBILE_FOOTER =
   /^\s*(?:sent from my |sent from mail for |sent from outlook|get outlook for )/i;
 
 /**
- * Strip the quoted history and the signature, leaving what this sender typed.
+ * Everything above the quoted history: this sender's own message, signature
+ * and all.
  *
- * Returns the whole input unchanged when nothing matches, and an empty string
- * when the sender typed nothing at all — a bare forward with no comment. An
- * empty result is a real answer, not a failure: it means the content rules have
- * no words of this sender's to judge, and they must then charge nothing rather
- * than fall back to judging the thread.
+ * Returns the whole input when nothing matches, and an empty string when the
+ * quoted history starts at the top — a bare forward the sender added nothing
+ * to. That empty string is a real answer, not a failure: it means there is
+ * nothing here that this sender wrote.
  *
- * KNOWN LIMITATION: the attribution pattern cuts at any line ending in
- * `wrote:`, so a body whose own prose ends a line that way ("here is what the
- * auditor wrote:") loses everything below it. This is the heuristic every
- * reply parser uses, and the failure is in the safe direction — the scan sees
- * FEWER of the sender's words and therefore charges fewer points, never more.
- * Narrowing it needs the date formats of every locale, which is the reason
- * this job belongs in a library and the reason the library was not usable.
+ * KNOWN LIMITATION: an attribution is recognised by shape, so a line of the
+ * sender's own prose that carries a date or an address and ends in `wrote:`
+ * cuts the message there. This is the heuristic every reply parser uses, and
+ * the failure is in the safe direction — less of the sender's text, never
+ * somebody else's counted as theirs.
+ */
+export function stripQuotedTail(text: string | null | undefined): string {
+  if (!text) return '';
+  let earliest = text.length;
+  for (const marker of QUOTE_MARKERS) {
+    const match = marker.exec(text);
+    if (match && match.index < earliest) earliest = match.index;
+  }
+  return text.slice(0, earliest).trimEnd();
+}
+
+/**
+ * Strip the quoted history AND the signature, leaving what this sender typed.
+ *
+ * The signature goes because this is the text a SCORE is computed over, and a
+ * sign-off is a sender's job title and phone number, not their argument — a
+ * rule that charges points for either would charge every mail from anyone with
+ * a long footer.
+ *
+ * Returns an empty string when the sender typed nothing at all. The content
+ * rules must then charge nothing rather than fall back to judging the thread.
  */
 export function ownWords(body: string | null | undefined): string {
-  if (!body) return '';
+  const own = stripQuotedTail(body);
+  if (!own) return '';
   const kept: string[] = [];
-  for (const line of body.split(/\r?\n/)) {
+  for (const line of own.split(/\r?\n/)) {
     if (SIGNATURE_DELIMITER.test(line) || MOBILE_FOOTER.test(line)) break;
-    if (QUOTE_START_PATTERNS.some((pattern) => pattern.test(line))) {
-      // A wrapped attribution left its opening line above the one that
-      // matched. Take it too, or the sender is credited with the date and
-      // address of the person they are replying to.
-      for (let last = kept[kept.length - 1]; last !== undefined && ATTRIBUTION_START.test(last);) {
-        kept.pop();
-        last = kept[kept.length - 1];
-      }
-      break;
-    }
     kept.push(line);
   }
   return kept.join('\n').trim();
