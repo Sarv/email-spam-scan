@@ -95,6 +95,17 @@ export interface Blocklist {
   zone: string;
   kind: BlocklistKind;
   /**
+   * The zone answers for IPv6 addresses as well as IPv4. Default false, and
+   * only meaningful for `kind: 'ip'`.
+   *
+   * Most operators publish v4 only and answer a 32-nibble query with
+   * NXDOMAIN — a round trip spent to learn nothing, on every message from a
+   * v6 sender. Declaring the capability is what keeps the query from being
+   * made; reading its ABSENCE as "not listed" would be the same mistake in
+   * the other direction, so an address no zone can answer for stays unknown.
+   */
+  ipv6?: boolean;
+  /**
    * Points for a listing whose return code `codes` does not describe.
    * Operators add codes; an unrecognised one is still a listing, and scoring
    * it zero would silently ignore the newest category a list publishes.
@@ -232,6 +243,7 @@ export interface ReputationResult {
 export const SPAMHAUS_ZEN: Blocklist = {
   name: 'spamhaus-zen',
   zone: 'zen.spamhaus.org',
+  ipv6: true,
   kind: 'ip',
   points: 3,
   codes: {
@@ -526,7 +538,14 @@ export function blocklistQueryName(
   target: string | null | undefined,
   blocklist: Blocklist,
 ): string | null {
-  const label = blocklist.kind === 'ip' ? reverseIpLabel(target) : normalizeQueryDomain(target);
+  if (blocklist.kind !== 'ip') {
+    const domain = normalizeQueryDomain(target);
+    return domain === null ? null : `${domain}.${blocklist.zone}`;
+  }
+  // A zone that has not said it answers for IPv6 is not asked, rather than
+  // asked and told NXDOMAIN by a nameserver that has never heard of v6.
+  if (blocklist.ipv6 !== true && (normalizeIp(target)?.includes(':') ?? false)) return null;
+  const label = reverseIpLabel(target);
   return label === null ? null : `${label}.${blocklist.zone}`;
 }
 

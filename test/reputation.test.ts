@@ -26,6 +26,11 @@ import {
 const PUBLIC_IP = '93.184.216.34';
 const PUBLIC_IP_REVERSED = '34.216.184.93';
 
+/** A public v6 address and its 32 reversed nibbles. */
+const PUBLIC_IPV6 = '2a00:1450:4001:80e::200e';
+const PUBLIC_IPV6_REVERSED =
+  'e.0.0.2.0.0.0.0.0.0.0.0.0.0.0.0.e.0.8.0.1.0.0.4.0.5.4.1.0.0.a.2';
+
 /** A resolver that answers from a table and remembers what it was asked. */
 function fakeDns(answers: Readonly<Record<string, string[] | Error>>): {
   query: DnsQuery;
@@ -130,6 +135,17 @@ describe('blocklistQueryName', () => {
     expect(blocklistQueryName('10.0.0.4', SPAMHAUS_ZEN)).toBeNull();
     expect(blocklistQueryName('not a domain', SPAMHAUS_DBL)).toBeNull();
     expect(blocklistQueryName(null, SPAMHAUS_ZEN)).toBeNull();
+  });
+
+  // Without the capability flag every v6 sender costs one wasted round trip
+  // per v4-only zone, on every message, to be told NXDOMAIN by a nameserver
+  // that has never published a v6 record.
+  it('asks only the zones that answer for IPv6 about a v6 address', () => {
+    expect(blocklistQueryName(PUBLIC_IPV6, SPAMHAUS_ZEN)).toBe(
+      `${PUBLIC_IPV6_REVERSED}.zen.spamhaus.org`,
+    );
+    expect(blocklistQueryName(PUBLIC_IPV6, SPAMCOP)).toBeNull();
+    expect(blocklistQueryName(PUBLIC_IP, SPAMCOP)).toBe(`${PUBLIC_IP_REVERSED}.bl.spamcop.net`);
   });
 });
 
