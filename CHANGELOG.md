@@ -102,6 +102,16 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   charged first and the domain takes what is left, so a truncated reason is
   always the weaker half; `assessReputation(result, { maxPoints: Infinity })`
   lifts the ceiling for a caller running its own points table.
+- **The shield explains the sender's mark.** `assessEmailSecurity` accepts a
+  `bimi` input — a `BimiLookup` from `/brand`, or the columns a caller cached
+  from one — and adds a `brand` check saying who proved ownership of the
+  domain and which Mark Verifying Authority vouched for them, or why no tick
+  is being shown. It never moves the level: most legitimate senders publish no
+  BIMI record, so scoring its absence would warn about most of the world's
+  mail, and a certificate proves who owns a brand rather than that this
+  message deserves trust. Reported as proof only under a DMARC pass, because
+  without one the sentence is what a spoofer would like the reader to see.
+  Omitting the input drops the row; passing `null` says "not looked up yet".
 - **Reports from other recipients** —
   `assessReputation(result, { userReports })` scores the one signal a lookup
   cannot find: how many other people have already reported this sender's

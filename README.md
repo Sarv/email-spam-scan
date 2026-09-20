@@ -489,6 +489,17 @@ conversation view — an empty list is `verified`, nothing to report. The human
 copy for each level is not in this package — a library cannot know your
 product's voice, its language, or its reading age.
 
+Pass `bimi` (a `BimiLookup` from `/brand`, or the columns you cached from one)
+and the assessment gains a `brand` check explaining the sender's mark: who
+proved ownership of the domain and which authority vouched for it, or why no
+tick is being shown. It never moves the level in either direction — most
+legitimate senders publish no BIMI record, so scoring its absence would warn
+about most of the world's mail, and a verified mark proves who owns a brand,
+not that this message deserves trust. A mark is only ever reported as proof
+under a DMARC pass: the certificate says who owns the brand, DMARC says this
+message came from them. Leaving `bimi` out drops the row entirely; passing
+`null` says "not looked up yet", which is a different thing to tell a reader.
+
 ## Reading a stored verdict back
 
 Score it once, store the number and the reasons, and read them back from
@@ -946,7 +957,7 @@ it with.
 - `assessEmailSecurity(input): SecurityAssessment`
 - `worstLevel(levels): SecurityLevel`
 - `LEVEL_RANK`, `linkRuleKey(senderDomain, shown, actual)`, `parseAuthStatus(json)`
-- `EMPTY_RULES`, `type LinkRuleSets`, `SecurityCheck`, `CheckStatus`
+- `EMPTY_RULES`, `type LinkRuleSets`, `SecurityCheck`, `CheckStatus`, `BrandIdentity` — what the `bimi` input needs of a `/brand` lookup
 
 ### Header reading — `@sarv-in/email-spam-scan/headers`
 
