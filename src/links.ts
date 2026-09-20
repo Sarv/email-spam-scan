@@ -53,8 +53,21 @@ export function assessLinks(html: string | null | undefined): PhishingReason[] {
 }
 
 /**
- * True when every http(s) link in the body resolves to the sender's own
+ * True when every http(s) link the sender WROTE resolves to their own
  * registrable domain. Absence of links counts as true — nothing points away.
+ *
+ * QUOTED HISTORY IS NOT THE SENDER'S. A reply carries the mail it answers,
+ * and that mail is somebody else's: its links, its footer, its logo. Counting
+ * them means the second message in every conversation and all after it fail a
+ * test the first one passed, for links their sender neither wrote nor is
+ * shown — clients collapse the quote. The claim this function backs is "every
+ * link in THIS message is the sender's own", and the quoted thread was never
+ * part of that claim.
+ *
+ * The deceptive-link check deliberately keeps the wide view: a link whose text
+ * names one domain and whose href goes to another is worth pointing at
+ * wherever in a thread it sits, because a forged quoted chain is a real
+ * phishing technique. See {@link linkMismatches}.
  *
  * Returns false when the sender's domain is unknown: the claim being made is
  * "everything here stays home", and there is no home to compare against.
@@ -66,6 +79,7 @@ export function linkDomainsAllMatch(
   if (!html) return true;
   if (!senderDomain) return false;
   for (const anchor of extractHtml(html).anchors) {
+    if (anchor.quoted) continue;
     const target = linkTarget(anchor.href);
     // Non-http(s) hrefs — `mailto:`, `#top`, `cid:` — are not places to be
     // sent, so they cannot point away from home.

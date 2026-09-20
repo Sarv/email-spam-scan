@@ -75,6 +75,17 @@ describe('assessLinks', () => {
   });
 });
 
+describe('linkMismatches — quoted history', () => {
+  // Regression: `linkDomainsAllMatch` stopped counting quoted links, and this
+  // check must NOT follow it. A forged quoted chain is a real phishing
+  // technique, so a link whose text names one domain and whose href goes to
+  // another is worth pointing at wherever in the thread it sits.
+  it('still finds a deceptive link inside the quoted thread', () => {
+    const html = `<blockquote>${anchor('paypal.com', 'https://paypal.secure-login.ru/pay')}</blockquote>`;
+    expect(linkMismatches(html)).toEqual([{ shown: 'paypal.com', actual: 'secure-login.ru' }]);
+  });
+});
+
 describe('linkDomainsAllMatch', () => {
   it('is true when every link stays on the sender’s own domain', () => {
     const html =
@@ -85,6 +96,33 @@ describe('linkDomainsAllMatch', () => {
   it('is false when any link points away', () => {
     const html =
       anchor('Account', 'https://example.net/a') + anchor('Track', 'https://tracker.io/t');
+    expect(linkDomainsAllMatch(html, 'example.net')).toBe(false);
+  });
+
+  // Regression: a reply carries the mail it answers, and that mail's links
+  // belong to the other party. Counting them cost `verified` to every message
+  // after the first in a thread — a green shield on the opener and a hollow
+  // one on every reply, for links their sender neither wrote nor is shown.
+  it('ignores links inside quoted history', () => {
+    const html = `${anchor('Our docs', 'https://example.net/docs')}<blockquote>${anchor('Their portal', 'https://other.example/login')}</blockquote>`;
+    expect(linkDomainsAllMatch(html, 'example.net')).toBe(true);
+  });
+
+  // Regression: clients that wrap the history in a plain div rather than a
+  // blockquote must be read the same way, or whether a reply can be verified
+  // depends on which client the OTHER party happened to use.
+  it('ignores them in a client quote container too, not only a blockquote', () => {
+    const quoted = anchor('Their portal', 'https://other.example/login');
+    expect(linkDomainsAllMatch(`<div class="gmail_quote">${quoted}</div>`, 'example.net')).toBe(
+      true,
+    );
+  });
+
+  // Regression: the exemption is for the QUOTE, not for the message. A blanket
+  // ignore would hand `verified` to a body whose own links point anywhere at
+  // all, as long as it also quoted something.
+  it('still fails on an off-domain link in the sender’s own words', () => {
+    const html = `${anchor('Click', 'https://tracker.io/t')}<blockquote>${anchor('Home', 'https://example.net/h')}</blockquote>`;
     expect(linkDomainsAllMatch(html, 'example.net')).toBe(false);
   });
 

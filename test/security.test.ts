@@ -71,6 +71,31 @@ describe('assessEmailSecurity — the level', () => {
     expect(levelOf({ auth: auth(), html: '<p>no links</p>' })).toBe('verified');
   });
 
+  // Regression: the shield went green on the first message of a thread and
+  // hollow on every reply, because a reply quotes the mail it answers and
+  // that mail's links are the other party's. The replier wrote none of them,
+  // and a client collapses the quote so the reader is not even shown them.
+  it('is verified when the only off-domain links sit in the quoted history', () => {
+    const html = `${anchor('Our docs', 'https://example.net/docs')}<blockquote>${anchor('Their portal', 'https://other.example/login')}</blockquote>`;
+    expect(levelOf({ auth: auth(), html })).toBe('verified');
+  });
+
+  // Regression: the exemption above is for the quote alone. The same link in
+  // the sender's own words still costs the top level, or "verified" would
+  // mean nothing more than "quoted something".
+  it('is authenticated when that same link is in the sender’s own words', () => {
+    const html = `${anchor('Their portal', 'https://other.example/login')}<blockquote>${anchor('Our docs', 'https://example.net/docs')}</blockquote>`;
+    expect(levelOf({ auth: auth(), html })).toBe('authenticated');
+  });
+
+  // Regression: exempting the quote from the VERIFIED test must not exempt it
+  // from the danger tests. A forged quoted chain is how a phish arrives
+  // looking like a conversation already in progress.
+  it('still escalates to caution for a deceptive link in the quoted history', () => {
+    const html = `<blockquote>${anchor('paypal.com', 'https://paypal.secure-login.ru/pay')}</blockquote>`;
+    expect(levelOf({ auth: auth(), html })).toBe('caution');
+  });
+
   // Regression: a newsletter that passes DMARC but links to its CDN is real,
   // not "everything in this mail is the sender". Calling that verified
   // devalues the top level on exactly the mail people get most of.

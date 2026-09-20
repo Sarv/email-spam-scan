@@ -480,7 +480,7 @@ mailed — Windows binaries, script-host formats, shortcuts and installers.
 
 | Level | Means |
 | --- | --- |
-| `verified` | Authentication passed and every link stays on the sender's own domain |
+| `verified` | Authentication passed and every link the sender wrote stays on their own domain — links inside quoted history belong to the message being answered and are not counted |
 | `authenticated` | Authentication passed; nothing else to say |
 | `unverified` | The server recorded no authentication verdict — common, not alarming |
 | `caution` | Something is off: a deceptive link, or a suspicious score |

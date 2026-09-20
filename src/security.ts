@@ -95,7 +95,8 @@ export interface SecurityAssessment {
    * the body is not loaded yet ({@link SecurityInput.bodyLoaded}).
    *
    * The level is then PROVISIONAL and can move either way once the body
-   * arrives: up to `verified` if every link stays on the sender's domain,
+   * arrives: up to `verified` if every link the sender wrote stays on their
+   * own domain,
    * down to `caution` or `danger` if one does not. A UI that lazy-loads
    * bodies should say "still checking" rather than render a provisional
    * clean level as a finding — but it must still render `caution` and
@@ -404,12 +405,15 @@ export function assessEmailSecurity(input: SecurityInput): SecurityAssessment {
   const authPassed =
     auth?.dmarc === 'pass' || (!dmarcKnown && auth?.spf === 'pass' && auth?.dkim === 'pass');
   if (authPassed) {
-    // Fully authenticated AND every link stays on the sender's own domain (or
-    // is a pair the user vetted): the top level. A newsletter that passes
-    // DMARC but links out to its CDN and tracker is authenticated, not
+    // Fully authenticated AND every link the sender wrote stays on their own
+    // domain (or is a pair the user vetted): the top level. A newsletter that
+    // passes DMARC but links out to its CDN and tracker is authenticated, not
     // verified — real, but not "everything in this mail is the sender".
     // `verified` is the claim that EVERYTHING in this mail is the sender's
-    // own — it cannot be made about a body that has not been read.
+    // own — it cannot be made about a body that has not been read. Quoted
+    // history is exempt: it is the mail being ANSWERED, not this one, and
+    // holding its links against the replier denied `verified` to every
+    // message after the first in a thread.
     return result(
       bodyLoaded && linkDomainsAllMatch(input.html, senderDomain) ? 'verified' : 'authenticated',
     );
