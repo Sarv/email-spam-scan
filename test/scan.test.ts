@@ -647,4 +647,82 @@ describe('scanMany', () => {
     expect((await collect([{ id: 'a', raw: message(CLEAN) }], { concurrency: 0 })).length).toBe(1);
     expect((await collect([{ id: 'a', raw: message(CLEAN) }], { concurrency: -3 })).length).toBe(1);
   });
+
+  // Regression: the bulk API exists so that a 50,000-message mailbox can be
+  // scanned without holding 50,000 messages in memory. That only works if the
+  // source is read lazily, and the window is what bounds it: at most
+  // `concurrency` messages have been pulled and not yet handed back, however
+  // long the stream runs. Drain the source eagerly — or keep finished results
+  // in a growing buffer — and the memory is the mailbox, not the window.
+  it('never reads more than concurrency messages ahead of the ones it has yielded', async () => {
+    let pulled = 0;
+    let yielded = 0;
+    let widest = 0;
+    async function* source(): AsyncGenerator<BulkScanInput> {
+      for (let index = 0; index < 500; index += 1) {
+        pulled += 1;
+        widest = Math.max(widest, pulled - yielded);
+        yield { id: String(index), raw: message([...CLEAN, `X-Index: ${index}`]) };
+      }
+    }
+
+    for await (const item of scanMany(source(), { concurrency: 4 })) {
+      expect(item.error).toBeNull();
+      yielded += 1;
+    }
+
+    // Four scans in flight; the fifth pull is what forces the head out. The
+    // number is the concurrency, not a function of the 500 messages behind it.
+    expect(yielded).toBe(500);
+    expect(widest).toBe(4);
+  });
+
+  // Regression: a consumer that walks away — a preview of the first page, a
+  // cancelled job, a `find` that stops at the first hit — leaves scans in
+  // flight, and some of those scans are failing. A rejected promise nobody is
+  // left to await is an unhandled rejection, which on a default Node 15+
+  // runtime terminates the host process: a mail server killed by a cancelled
+  // preview. `scanOne` catching everything is what makes that impossible, so
+  // it must stay caught. The source must also stop being pulled, or breaking
+  // early still reads the whole mailbox.
+  it('pulls no further and rejects nothing when the consumer breaks early', async () => {
+    const unhandled: unknown[] = [];
+    const record = (reason: unknown): void => {
+      unhandled.push(reason);
+    };
+    process.on('unhandledRejection', record);
+
+    let pulled = 0;
+    const failing = (): ReadableStream =>
+      new ReadableStream({
+        start(controller) {
+          controller.error(new Error('disk read failed'));
+        },
+      });
+    async function* source(): AsyncGenerator<BulkScanInput> {
+      for (let index = 0; index < 200; index += 1) {
+        pulled += 1;
+        // Every third message fails, so the abandoned window holds rejections.
+        yield index % 3 === 0
+          ? { id: String(index), raw: failing() }
+          : { id: String(index), raw: message([...CLEAN, `X-Index: ${index}`]) };
+      }
+    }
+
+    let seen = 0;
+    for await (const item of scanMany(source(), { concurrency: 8 })) {
+      void item;
+      seen += 1;
+      if (seen === 5) break;
+    }
+
+    // Long enough for an unhandled rejection to be reported if one exists.
+    await new Promise((resolve) => setTimeout(resolve, 50));
+    process.off('unhandledRejection', record);
+
+    expect(unhandled).toEqual([]);
+    expect(seen).toBe(5);
+    // The five yielded, plus at most one window still in flight when we left.
+    expect(pulled).toBeLessThanOrEqual(seen + 8);
+  });
 });
