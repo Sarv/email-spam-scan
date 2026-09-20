@@ -10,8 +10,6 @@
  */
 import { generateKeyPairSync } from 'node:crypto';
 
-import { dkimSign } from 'mailauth';
-
 import type { DnsResolver } from '../src/verify.js';
 
 export const SIGNING_DOMAIN = 'example.com';
@@ -76,8 +74,26 @@ export const UNSIGNED_MESSAGE = [
   '',
 ].join('\r\n');
 
+/**
+ * Whether `mailauth` — the optional peer that signs the message below — can be
+ * loaded on this runtime at all.
+ *
+ * Since 5.0 it requires Node >=22.19: its copy of `undici` calls
+ * `webidl.util.markAsUncloneable` while the module is still evaluating, and an
+ * older runtime does not have that function. A STATIC import here therefore
+ * takes the whole test FILE down at collection on the older Node this package
+ * still supports — including every test in it that never signs anything. So it
+ * is loaded on first use, exactly as `src/verify.ts` loads it, and the suites
+ * that need a real signature skip themselves when it cannot be had.
+ */
+export const SIGNING_SUPPORTED = await import('mailauth').then(
+  () => true,
+  () => false,
+);
+
 /** The same message with a real DKIM signature over it. */
 export async function signedMessage(raw = UNSIGNED_MESSAGE): Promise<string> {
+  const { dkimSign } = await import('mailauth');
   // `signatureData`, not the top-level `signingDomain`/`selector` its shipped
   // type declarations describe — those are silently ignored and the result is
   // an unsigned message and an empty error list.

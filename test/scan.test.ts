@@ -11,6 +11,7 @@ import {
   PASSING_ZONE,
   SENDER_IP,
   SIGNING_DOMAIN,
+  SIGNING_SUPPORTED,
 } from './dkim-fixture.js';
 
 /** A raw RFC 5322 message. Headers as given, then a blank line, then the body. */
@@ -471,20 +472,24 @@ describe('scan with a verified authentication verdict', () => {
   // the shape `scan` accepts. Nothing else proves the two halves of this
   // feature were built against the same type, and a mismatch would only show
   // up in a consumer's code.
-  it('accepts what verifyAuthentication returns, over a really signed message', async () => {
-    const raw = await signedMessage();
-    const verification = await verifyAuthentication(raw, {
-      ip: SENDER_IP,
-      helo: `mx.${SIGNING_DOMAIN}`,
-      mailFrom: `ankur@${SIGNING_DOMAIN}`,
-      resolver: fakeResolver(PASSING_ZONE),
-    });
+  // Skipped where `mailauth` cannot load (Node < 22.19 — see SIGNING_SUPPORTED).
+  it.skipIf(!SIGNING_SUPPORTED)(
+    'accepts what verifyAuthentication returns, over a really signed message',
+    async () => {
+      const raw = await signedMessage();
+      const verification = await verifyAuthentication(raw, {
+        ip: SENDER_IP,
+        helo: `mx.${SIGNING_DOMAIN}`,
+        mailFrom: `ankur@${SIGNING_DOMAIN}`,
+        resolver: fakeResolver(PASSING_ZONE),
+      });
 
-    const result = await scan(raw, { auth: verification.auth });
+      const result = await scan(raw, { auth: verification.auth });
 
-    expect(result.auth).toEqual({ spf: 'pass', dkim: 'pass', dmarc: 'pass', overall: 'pass' });
-    expect(result.reasons.map((reason) => reason.id)).not.toContain('auth-failed');
-  });
+      expect(result.auth).toEqual({ spf: 'pass', dkim: 'pass', dmarc: 'pass', overall: 'pass' });
+      expect(result.reasons.map((reason) => reason.id)).not.toContain('auth-failed');
+    },
+  );
 });
 
 describe('scan with a reputation assessment', () => {

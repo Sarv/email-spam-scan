@@ -11,6 +11,7 @@ import {
   fakeResolver,
   hangingResolver,
   signedMessage,
+  SIGNING_SUPPORTED,
   PASSING_ZONE,
   SELECTOR,
   SENDER_IP,
@@ -280,7 +281,9 @@ describe('authVerificationFrom: the rolled-up verdict', () => {
   });
 });
 
-describe('verifyAuthentication', () => {
+// Skipped where `mailauth` cannot load (Node < 22.19 — see SIGNING_SUPPORTED).
+// Everything above this line is the pure mapping and runs everywhere.
+describe.skipIf(!SIGNING_SUPPORTED)('verifyAuthentication', () => {
   // The end-to-end proof, with a real RSA signature over real bytes and a real
   // SPF evaluation — against a fixture zone, so it cannot break because
   // somebody rotated a key in DNS a year from now.
