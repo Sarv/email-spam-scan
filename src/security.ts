@@ -18,10 +18,16 @@
  *   the verdict that actually filed the message, not a fresh one from a newer
  *   rule set that would explain a decision nobody made.
  *
+ *   BRAND IDENTITY — what the sender's domain publishes about its own logo,
+ *   as `/brand` resolved it. Reported, never scored: a domain with no BIMI
+ *   record is not suspicious, and a Verified Mark Certificate proves who owns
+ *   a brand, not that this message deserves the reader's trust.
+ *
  * What is deliberately NOT here: the human copy for each level. A library
  * cannot know the product's voice, its language, or its reading age. Callers
  * map the level to their own strings.
  */
+import type { BimiStatus } from './brand/bimi.js';
 import { assessSender, registrableDomain } from './identity.js';
 import { linkDomainsAllMatch, linkMismatches, type LinkMismatch } from './links.js';
 import {
@@ -50,7 +56,7 @@ export type CheckStatus = 'pass' | 'fail' | 'warn' | 'unknown';
 
 /** One line of the explanation: what was checked and how it came out. */
 export interface SecurityCheck {
-  id: 'spf' | 'dkim' | 'dmarc' | 'sender' | 'links' | 'spam';
+  id: 'spf' | 'dkim' | 'dmarc' | 'sender' | 'links' | 'spam' | 'brand';
   label: string;
   status: CheckStatus;
   /** Plain-language detail, e.g. "Text says x.com, link goes to y.com". */
@@ -65,6 +71,21 @@ export interface LinkRuleSets {
 }
 
 export const EMPTY_RULES: LinkRuleSets = { trusted: new Set(), blocked: new Set() };
+
+/**
+ * What the shield needs of a BIMI lookup: the standing, who proved it, and
+ * why. A whole `BimiLookup` from `/brand` satisfies it, and so does the
+ * handful of columns a caller cached from one — the status is the only part
+ * that must be there. Typed against `/brand`'s own union so the two cannot
+ * drift apart, and imported as a TYPE, so nothing about this entry's
+ * dependency cost changes.
+ */
+export interface BrandIdentity {
+  status: BimiStatus;
+  organization?: string | null;
+  issuer?: string | null;
+  detail?: string | null;
+}
 
 export interface SecurityAssessment {
   level: SecurityLevel;
@@ -144,6 +165,16 @@ export interface SecurityInput {
   spamReasons?: readonly SpamReason[] | string | null;
   /** The user's trust/block rules. Defaults to none. */
   rules?: LinkRuleSets;
+  /**
+   * The sender domain's BIMI standing, if the caller has looked it up — a
+   * `BimiLookup` from `/brand`, or the columns it cached from one.
+   *
+   * Three states, not two: leave it `undefined` and the shield says nothing
+   * about the brand at all, pass `null` and it says "not looked up yet".
+   * A reader who has been shown a tick on this sender before is owed the
+   * difference between "no mark" and "we have not asked yet".
+   */
+  bimi?: BrandIdentity | null;
 }
 
 /** Decide the level for one message. */
@@ -288,6 +319,16 @@ export function assessEmailSecurity(input: SecurityInput): SecurityAssessment {
     });
   }
 
+  // Brand identity (BIMI), when the caller has looked it up. The logo and the
+  // tick belong to a message only on a DMARC pass: the certificate says who
+  // owns the brand, DMARC says this message came from them. It is reported so
+  // the shield can explain a tick's ABSENCE — a reader who saw a logo on the
+  // last message from this sender will otherwise read its disappearance as
+  // nothing at all.
+  if (input.bimi !== undefined) {
+    checks.push(brandCheck(input.bimi, auth?.dmarc === 'pass', senderDomain));
+  }
+
   const result = (level: SecurityLevel): SecurityAssessment => ({
     level,
     checks,
@@ -336,6 +377,62 @@ export function assessEmailSecurity(input: SecurityInput): SecurityAssessment {
     return result(linkDomainsAllMatch(input.html, senderDomain) ? 'verified' : 'authenticated');
   }
   return result('unverified');
+}
+
+/**
+ * One line about the sender's mark.
+ *
+ * It never moves the level, in either direction. A verified mark proves who
+ * owns the domain — which DMARC already settled for this message — and the
+ * overwhelming majority of legitimate senders publish no mark at all, so
+ * scoring its absence would put a warning on most of the world's mail.
+ */
+function brandCheck(
+  bimi: BrandIdentity | null,
+  dmarcPass: boolean,
+  senderDomain: string | null,
+): SecurityCheck {
+  const check = (status: CheckStatus, detail: string): SecurityCheck => ({
+    id: 'brand',
+    label: 'Brand identity',
+    status,
+    detail,
+  });
+  if (!bimi) return check('unknown', 'Not looked up yet');
+  switch (bimi.status) {
+    case 'verified':
+      return dmarcPass
+        ? check(
+            'pass',
+            `${bimi.organization ?? 'The brand'} proved ownership of ${senderDomain ?? 'this domain'} with a Verified Mark Certificate from ${bimi.issuer ?? 'a Mark Verifying Authority'}`,
+          )
+        : check(
+            'warn',
+            'The domain publishes a verified logo, but this message did not pass DMARC — logo and tick withheld',
+          );
+    case 'logo':
+      return dmarcPass
+        ? check('pass', 'The domain publishes a BIMI logo, without a Verified Mark Certificate')
+        : check(
+            'warn',
+            'The domain publishes a logo, but this message did not pass DMARC — logo withheld',
+          );
+    case 'declined':
+      return check('unknown', 'The domain declines to show a logo');
+    case 'none':
+      return check('unknown', 'The domain publishes no BIMI record');
+    case 'invalid':
+      return check(
+        'unknown',
+        `BIMI record unusable: ${bimi.detail ?? 'the record could not be read'}`,
+      );
+  }
+  // 'error' — the lookup itself did not finish. Deliberately not a warning
+  // about the SENDER: a resolver timeout is a fact about the network here.
+  return check(
+    'unknown',
+    bimi.detail ? `The brand lookup failed: ${bimi.detail}` : 'The brand lookup failed',
+  );
 }
 
 /** The worst level among several messages — what a thread-level banner shows. */

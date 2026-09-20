@@ -7,7 +7,9 @@ import {
   worstLevel,
   EMPTY_RULES,
   LEVEL_RANK,
+  type BrandIdentity,
   type LinkRuleSets,
+  type SecurityCheck,
   type SecurityLevel,
 } from '../src/security.js';
 import type { AuthStatus } from '../src/verdict.js';
@@ -338,6 +340,131 @@ describe('assessEmailSecurity — input shapes', () => {
     expect(assessEmailSecurity({ ...SENDER }).senderDomain).toBe('example.net');
     expect(assessEmailSecurity({ fromAddress: 'nonsense' }).senderDomain).toBeNull();
     expect(assessEmailSecurity({}).senderDomain).toBeNull();
+  });
+});
+
+/**
+ * The sender's mark. `/brand` resolves what a domain publishes about its own
+ * logo; this is the one line the shield says about it.
+ *
+ * What this protects: a reader who has seen a tick on this sender before and
+ * does not see one today is owed a reason. Every branch below is a different
+ * reason, and a wrong one is worse than none — telling somebody a brand
+ * "proved ownership" of a message that failed DMARC is exactly the sentence
+ * a spoofer needs.
+ */
+describe('assessEmailSecurity — the sender brand mark', () => {
+  const brandOf = (
+    bimi: BrandIdentity | null,
+    over: Parameters<typeof assessEmailSecurity>[0] = {},
+  ): SecurityCheck | undefined =>
+    assessEmailSecurity({ ...SENDER, auth: auth(), bimi, ...over }).checks.find(
+      (check) => check.id === 'brand',
+    );
+
+  // Three states, not two. A caller that never looks BIMI up must not get a
+  // row claiming the domain publishes nothing.
+  it('says nothing at all when the caller did not ask', () => {
+    expect(assessEmailSecurity({ ...SENDER }).checks.some((check) => check.id === 'brand')).toBe(
+      false,
+    );
+    expect(brandOf(null)?.status).toBe('unknown');
+    expect(brandOf(null)?.detail).toBe('Not looked up yet');
+  });
+
+  it('names the organisation, the domain and the authority behind a verified mark', () => {
+    const check = brandOf({
+      status: 'verified',
+      organization: 'Example Inc',
+      issuer: 'Test Verified Mark Root',
+    });
+
+    expect(check?.status).toBe('pass');
+    expect(check?.detail).toBe(
+      'Example Inc proved ownership of example.net with a Verified Mark Certificate from Test Verified Mark Root',
+    );
+  });
+
+  // A cached row need not carry every field, and a sentence with an "undefined"
+  // in it is worse than a vaguer one.
+  it('falls back to plain words for a mark whose row names nobody', () => {
+    const check = brandOf({ status: 'verified' }, { fromAddress: null });
+
+    expect(check?.detail).toBe(
+      'The brand proved ownership of this domain with a Verified Mark Certificate from a Mark Verifying Authority',
+    );
+  });
+
+  // THE regression in this block. The certificate says who owns the brand;
+  // DMARC says this message came from them. Without the second, the first
+  // sentence is what a spoofer would like the reader to see.
+  it('withholds the tick when the message did not pass DMARC', () => {
+    const check = brandOf(
+      { status: 'verified', organization: 'Example Inc' },
+      {
+        auth: auth({ dmarc: 'none' }),
+      },
+    );
+
+    expect(check?.status).toBe('warn');
+    expect(check?.detail).toBe(
+      'The domain publishes a verified logo, but this message did not pass DMARC — logo and tick withheld',
+    );
+  });
+
+  it('distinguishes a logo with no certificate from a verified mark', () => {
+    expect(brandOf({ status: 'logo' })).toEqual({
+      id: 'brand',
+      label: 'Brand identity',
+      status: 'pass',
+      detail: 'The domain publishes a BIMI logo, without a Verified Mark Certificate',
+    });
+    expect(brandOf({ status: 'logo' }, { auth: auth({ dmarc: 'fail' }) })?.detail).toBe(
+      'The domain publishes a logo, but this message did not pass DMARC — logo withheld',
+    );
+  });
+
+  // A domain that declines and a domain that publishes nothing are different
+  // facts, and neither is a complaint about the message.
+  it('reports the quiet outcomes as unknown, each in its own words', () => {
+    expect(brandOf({ status: 'declined' })?.detail).toBe('The domain declines to show a logo');
+    expect(brandOf({ status: 'none' })?.detail).toBe('The domain publishes no BIMI record');
+    expect(brandOf({ status: 'declined' })?.status).toBe('unknown');
+  });
+
+  it('passes on why a record was unusable, and says so plainly when it cannot', () => {
+    expect(brandOf({ status: 'invalid', detail: 'l= is not an https URL' })?.detail).toBe(
+      'BIMI record unusable: l= is not an https URL',
+    );
+    expect(brandOf({ status: 'invalid' })?.detail).toBe(
+      'BIMI record unusable: the record could not be read',
+    );
+  });
+
+  // Regression: a resolver timeout is a fact about the network, never about
+  // the sender. It must never read as a warning about the mail.
+  it('reports a failed lookup as unknown rather than as a warning', () => {
+    expect(brandOf({ status: 'error', detail: 'ESERVFAIL' })).toEqual({
+      id: 'brand',
+      label: 'Brand identity',
+      status: 'unknown',
+      detail: 'The brand lookup failed: ESERVFAIL',
+    });
+    expect(brandOf({ status: 'error' })?.detail).toBe('The brand lookup failed');
+  });
+
+  // THE other regression: the mark explains, it does not score. Most
+  // legitimate senders publish no BIMI record at all, so letting its absence
+  // (or a failed lookup) touch the level would warn about most of the world's
+  // mail — and a verified mark must not lift a message DMARC already doubted.
+  it('never moves the level, in either direction', () => {
+    const verified: BrandIdentity = { status: 'verified', organization: 'Example Inc' };
+
+    expect(levelOf({ auth: auth(), bimi: { status: 'none' } })).toBe('verified');
+    expect(levelOf({ auth: auth(), bimi: { status: 'error' } })).toBe('verified');
+    expect(levelOf({ auth: auth({ dmarc: 'fail' }), bimi: verified })).toBe('danger');
+    expect(levelOf({ auth: auth(), bimi: verified, spamScore: 7 })).toBe('caution');
+    expect(levelOf({ bimi: verified })).toBe('unverified');
   });
 });
 

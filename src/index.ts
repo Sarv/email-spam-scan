@@ -143,6 +143,7 @@ export {
   worstLevel,
   EMPTY_RULES,
   LEVEL_RANK,
+  type BrandIdentity,
   type CheckStatus,
   type LinkRuleSets,
   type SecurityAssessment,
