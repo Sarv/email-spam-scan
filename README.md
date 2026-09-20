@@ -500,6 +500,16 @@ under a DMARC pass: the certificate says who owns the brand, DMARC says this
 message came from them. Leaving `bimi` out drops the row entirely; passing
 `null` says "not looked up yet", which is a different thing to tell a reader.
 
+If your client fetches bodies lazily, pass `bodyLoaded: false` until the body
+is in hand. An absent body is not a body with no links in it: read as "checked,
+found nothing" it makes every unfetched message `verified` — the top level,
+awarded for a body nobody has looked at. With `bodyLoaded: false` the links
+check reports `unknown`, the level stops at `authenticated`, and the assessment
+sets `pending: true` so you can show "still checking" instead of a level you
+would have to take back. What `pending` must NOT hide is a warning: `caution`
+and `danger` come from the headers, which arrived with the message, so render
+those as they are.
+
 ## Reading a stored verdict back
 
 Score it once, store the number and the reasons, and read them back from
