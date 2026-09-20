@@ -338,6 +338,13 @@ export const SPAMHAUS_DBL: Blocklist = {
       category: 'abused',
     },
   },
+  refusals: {
+    // DBL answers an IP-shaped query inside its LISTING range rather than in
+    // the operator-error range every other refusal uses. Read as a listing it
+    // is a false positive of the worst kind: every domain would come back
+    // listed the moment a caller asked DBL about an address.
+    '127.0.1.255': 'the zone refuses IP queries, which is what this answer means',
+  },
 };
 
 /** SpamCop — one code, and it means the address was reported by recipients. */
@@ -582,12 +589,17 @@ export function readBlocklistCodes(blocklist: Blocklist, codes: readonly string[
     return { ...nothing, error: explained.join('; ') };
   }
 
-  const listings = codes.filter(isListingCode);
+  // A code the zone has DECLARED a refusal is never a listing, wherever in
+  // 127.0.0.0/8 the operator chose to publish it — DBL puts one in the middle
+  // of its listing range. It is still only read as a refusal when nothing
+  // else in the same answer is a listing, just below.
+  const refusals = blocklist.refusals ?? {};
+  const listings = codes.filter((code) => isListingCode(code) && refusals[code] === undefined);
   if (listings.length === 0) {
     if (codes.length === 0) return { ...nothing, error: null };
     // A zone that publishes its refusal inside 127.0.0.0/8 gets to say so in
     // its own words; everything else is a wildcard or a hijacked answer.
-    const refused = codes.flatMap((code) => blocklist.refusals?.[code] ?? []);
+    const refused = codes.flatMap((code) => refusals[code] ?? []);
     if (refused.length > 0) return { ...nothing, error: [...new Set(refused)].join('; ') };
     return {
       ...nothing,

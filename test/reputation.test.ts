@@ -307,6 +307,20 @@ describe('readBlocklistCodes', () => {
     expect(readBlocklistCodes(URIBL, ['127.0.0.1']).error).toMatch(/free-use limit/);
   });
 
+  // DBL publishes its "you asked me about an IP" refusal INSIDE the listing
+  // range, where every other operator uses 127.255.255.x. Read as a listing
+  // it would accuse every domain in a message the moment one caller asked
+  // DBL about an address.
+  it('reads the DBL IP-query refusal as a refusal, not as an undescribed listing', () => {
+    expect(readBlocklistCodes(SPAMHAUS_DBL, ['127.0.1.255'])).toEqual({
+      listings: [],
+      meanings: [],
+      categories: [],
+      points: 0,
+      error: 'the zone refuses IP queries, which is what this answer means',
+    });
+  });
+
   // A zone that answers with both has still told us something true about the
   // domain; dropping the listing because a refusal rode along with it would
   // lose the only evidence in the answer.
