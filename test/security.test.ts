@@ -468,6 +468,58 @@ describe('assessEmailSecurity — the sender brand mark', () => {
   });
 });
 
+describe('assessEmailSecurity — a body that has not arrived yet', () => {
+  const spoofedLink = anchor('example.net', 'https://evil.example/login');
+
+  // Regression: a client that lazy-loads bodies asked for a verdict with no
+  // body at all, and got `verified` — the TOP level, its badge earned by a
+  // links check that read an empty string and reported "nothing deceptive".
+  // Every unread message in the list wore a green shield the filter had no
+  // grounds to give it.
+  it('never awards verified for a body it has not read', () => {
+    expect(levelOf({ auth: auth() })).toBe('verified');
+    expect(levelOf({ auth: auth(), bodyLoaded: false })).toBe('authenticated');
+  });
+
+  it('reports the links check as unknown, not as a pass', () => {
+    const pending = assessEmailSecurity({ ...SENDER, auth: auth(), bodyLoaded: false });
+    const links = pending.checks.find((c) => c.id === 'links');
+    expect(links?.status).toBe('unknown');
+    expect(links?.detail).toContain('not been downloaded');
+    expect(pending.pending).toBe(true);
+    expect(pending.untrustedLinks).toEqual([]);
+  });
+
+  // The flag is what a caller renders "still checking" from, so a loaded body
+  // must never set it — a permanent spinner is the same bug in reverse.
+  it('is not pending once the body is there', () => {
+    expect(assessEmailSecurity({ ...SENDER, auth: auth() }).pending).toBe(false);
+    expect(assessEmailSecurity({ ...SENDER, auth: auth(), bodyLoaded: true }).pending).toBe(false);
+  });
+
+  // THE thing a pending state must not do: withhold a warning. Authentication
+  // and the spam verdict come from the headers, which arrived with the
+  // message — a DMARC failure is final before the first byte of the body.
+  it('still condemns a message the headers already condemn', () => {
+    const danger = assessEmailSecurity({
+      fromName: 'example.net',
+      fromAddress: 'alice@evil.example',
+      auth: auth({ spf: 'fail', dkim: 'fail', dmarc: 'fail', overall: 'fail' }),
+      bodyLoaded: false,
+    });
+    expect(danger.level).toBe('danger');
+    expect(danger.pending).toBe(true);
+  });
+
+  // And the level it holds back is provisional in BOTH directions: the same
+  // message that reads `authenticated` while pending becomes `caution` when
+  // the body turns out to carry a deceptive link.
+  it('moves once the body arrives', () => {
+    expect(levelOf({ auth: auth(), html: spoofedLink, bodyLoaded: false })).toBe('authenticated');
+    expect(levelOf({ auth: auth(), html: spoofedLink })).toBe('caution');
+  });
+});
+
 describe('worstLevel', () => {
   // Regression: a thread banner must escalate to its worst message. Returning
   // the first or the last mislabels a clean opener when message 14 is a spoof.

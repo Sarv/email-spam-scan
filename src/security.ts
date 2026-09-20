@@ -90,6 +90,18 @@ export interface BrandIdentity {
 export interface SecurityAssessment {
   level: SecurityLevel;
   checks: SecurityCheck[];
+  /**
+   * A check that needs the message body has not run, because the caller said
+   * the body is not loaded yet ({@link SecurityInput.bodyLoaded}).
+   *
+   * The level is then PROVISIONAL and can move either way once the body
+   * arrives: up to `verified` if every link stays on the sender's domain,
+   * down to `caution` or `danger` if one does not. A UI that lazy-loads
+   * bodies should say "still checking" rather than render a provisional
+   * clean level as a finding — but it must still render `caution` and
+   * `danger`, which come from the headers and are already final.
+   */
+  pending: boolean;
   /** Deceptive links found and NOT covered by a trust rule — what "I trust this" acts on. */
   untrustedLinks: LinkMismatch[];
   /** Deceptive links the user has explicitly blocked — forces `danger`. */
@@ -157,6 +169,17 @@ export interface SecurityInput {
   fromAddress?: string | null;
   /** The message body as HTML, for the link checks. */
   html?: string | null;
+  /**
+   * Whether `html` is the message's real body. Default true.
+   *
+   * Pass `false` while the body is still being fetched. An absent body is not
+   * a body with no links in it, and the difference is the whole verdict: read
+   * as "checked, nothing found" it makes every unfetched message `verified`
+   * — the top level, awarded for a body nobody has looked at. With `false`
+   * the links check reports `unknown`, the level stops at `authenticated`,
+   * and {@link SecurityAssessment.pending} says so.
+   */
+  bodyLoaded?: boolean;
   /** A stored `AuthStatus` — either the object, or the JSON string it was stored as. */
   auth?: AuthStatus | string | null;
   /** The header-stage score, as computed when the message arrived. */
@@ -236,8 +259,11 @@ export function assessEmailSecurity(input: SecurityInput): SecurityAssessment {
         },
   );
 
-  // Deceptive links, minus the pairs the user has vetted.
-  const all = linkMismatches(input.html);
+  // Deceptive links, minus the pairs the user has vetted. A body the caller
+  // has not fetched yet yields no links to read — and, crucially, is not
+  // reported as a body with none.
+  const bodyLoaded = input.bodyLoaded !== false;
+  const all = bodyLoaded ? linkMismatches(input.html) : [];
   const key = (m: LinkMismatch): string => linkRuleKey(senderDomain ?? '', m.shown, m.actual);
   const blockedLinks = all.filter((m) => rules.blocked.has(key(m)));
   const untrustedLinks = all.filter(
@@ -245,7 +271,14 @@ export function assessEmailSecurity(input: SecurityInput): SecurityAssessment {
   );
   const trustedCount = all.length - blockedLinks.length - untrustedLinks.length;
 
-  if (blockedLinks.length) {
+  if (!bodyLoaded) {
+    checks.push({
+      id: 'links',
+      label: 'Links',
+      status: 'unknown',
+      detail: 'The message body has not been downloaded yet, so its links are unchecked',
+    });
+  } else if (blockedLinks.length) {
     const first = blockedLinks[0] as LinkMismatch;
     checks.push({
       id: 'links',
@@ -332,6 +365,7 @@ export function assessEmailSecurity(input: SecurityInput): SecurityAssessment {
   const result = (level: SecurityLevel): SecurityAssessment => ({
     level,
     checks,
+    pending: !bodyLoaded,
     untrustedLinks,
     blockedLinks,
     senderDomain,
@@ -374,7 +408,11 @@ export function assessEmailSecurity(input: SecurityInput): SecurityAssessment {
     // is a pair the user vetted): the top level. A newsletter that passes
     // DMARC but links out to its CDN and tracker is authenticated, not
     // verified — real, but not "everything in this mail is the sender".
-    return result(linkDomainsAllMatch(input.html, senderDomain) ? 'verified' : 'authenticated');
+    // `verified` is the claim that EVERYTHING in this mail is the sender's
+    // own — it cannot be made about a body that has not been read.
+    return result(
+      bodyLoaded && linkDomainsAllMatch(input.html, senderDomain) ? 'verified' : 'authenticated',
+    );
   }
   return result('unverified');
 }
