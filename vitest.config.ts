@@ -24,6 +24,7 @@ export default defineConfig({
         'src/headers/index.ts',
         'src/content/index.ts',
         'src/attachments/index.ts',
+        'src/brand/index.ts',
       ],
       // Enforced, not aspirational. A wrong verdict here either files somebody's
       // invoice as spam or lets a phish through with a green shield, and both

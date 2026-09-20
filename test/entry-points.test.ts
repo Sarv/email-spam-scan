@@ -44,6 +44,14 @@ const EXPECTED: Record<string, readonly string[]> = {
   // through a DYNAMIC import, for the same reason `mailauth` does below.
   'src/reputation.ts': ['ipaddr.js'],
   'src/identity.ts': ['tldts'],
+  // The brand stage parses a published SVG (`htmlparser2`) and a homepage's
+  // declared icons with the same parser, and needs `tldts` to fall back from
+  // `mailer.example.com` to `example.com`. Its certificate tooling —
+  // `@peculiar/x509`, `asn1js` and the `reflect-metadata` polyfill they need —
+  // is DYNAMICALLY imported and declared as optional peer dependencies, so a
+  // consumer who only wants a logo or a favicon installs none of it. The
+  // assertion below is what keeps that true.
+  'src/brand/index.ts': ['htmlparser2', 'tldts'],
   'src/links.ts': ['htmlparser2', 'tldts'],
   'src/security.ts': ['htmlparser2', 'tldts'],
   'src/content/index.ts': ['htmlparser2', 'tldts'],
@@ -127,9 +135,22 @@ describe('entry-point dependency cost', () => {
   // main entry — which re-exports this module — whether or not the consumer
   // ever looks up a blocklist.
   it('reaches node:dns only through a dynamic import, never a static one', () => {
-    const source = readFileSync(resolve(SRC_ROOT, 'src/reputation.ts'), 'utf8');
+    const source = readFileSync(resolve(SRC_ROOT, 'src/dns.ts'), 'utf8');
     expect(source).toContain("await import('node:dns/promises')");
     expect(source).not.toMatch(/^(?:import|export)\s[^;]*\bfrom\s+'node:/m);
+  });
+
+  // The same regression for the certificate tooling, where the stakes are a
+  // consumer's install size AND their type-check: `@peculiar/x509` and
+  // `asn1js` are optional peers, so a static import would both fatten every
+  // bundle that touches the brand entry and break `tsc` for the consumers who
+  // deliberately did not install them.
+  it('reaches the certificate tooling only through dynamic imports', () => {
+    const source = readFileSync(resolve(SRC_ROOT, 'src/brand/peers.ts'), 'utf8');
+    for (const peer of ['reflect-metadata', '@peculiar/x509', 'asn1js']) {
+      expect(source).toContain(`await import('${peer}')`);
+    }
+    expect(source).not.toMatch(/^(?:import|export)\s[^;]*\bfrom\s+'(?:@peculiar|asn1js|reflect)/m);
   });
 
   // The barrel must reach everything the narrow entries do, or a Node consumer
@@ -142,6 +163,7 @@ describe('entry-point dependency cost', () => {
       './headers/index.js',
       './identity.js',
       './links.js',
+      './brand/index.js',
       './reputation.js',
       './scan.js',
       './security.js',

@@ -52,6 +52,14 @@ export default defineConfig({
     // `mailauth` above — through a dynamic import, so nothing resolves it
     // until a lookup actually happens and no browser bundle trips over it.
     reputation: 'src/reputation.ts',
+    // `brand` is the sender's mark: the BIMI logo a domain publishes, the
+    // certificate that verifies it, and the favicon that stands in when there
+    // is neither. It reaches the network like the two above, and like them it
+    // does so through injected DNS and fetch — so it is the one networked
+    // entry a browser can also import. Its certificate tooling
+    // (`@peculiar/x509`, `asn1js`) is optional and dynamically imported, for
+    // the same reason `mailauth` is.
+    brand: 'src/brand/index.ts',
   },
   format: ['esm', 'cjs'],
   dts: true,
