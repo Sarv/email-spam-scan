@@ -73,7 +73,42 @@ export type SpamReasonId =
   // the network, which is why it is opt-in, asynchronous, and reaches the
   // scanner as a finished assessment rather than as a rule.
   | 'reputation-ip-listed'
-  | 'reputation-domain-listed';
+  | 'reputation-domain-listed'
+  // The one signal in that stage that comes from neither the message nor a
+  // blocklist: how many OTHER recipients have reported mail from this sender.
+  // Only a host holding many mailboxes can count it, so nothing in this
+  // package produces it on its own — a caller passes the count in.
+  | 'reputation-user-reported';
+
+/**
+ * Reason ids this package has renamed, and what they are called now.
+ *
+ * Sarv Inbox shipped `ip-blocklisted`, `domain-blocklisted` and
+ * `user-reported` before this package existed, and those strings are sitting
+ * in stored verdicts on users' disks. Rows already written are not worth a
+ * migration — a verdict is a cached opinion about mail that arrived months
+ * ago — so the reader maps them on the way in and every consumer switches on
+ * one set of ids. Adding to this table is how any future rename stays
+ * invisible to a reader.
+ */
+const RENAMED_REASON_IDS: Readonly<Record<string, SpamReasonId>> = {
+  'ip-blocklisted': 'reputation-ip-listed',
+  'domain-blocklisted': 'reputation-domain-listed',
+  'user-reported': 'reputation-user-reported',
+};
+
+/**
+ * The id a stored reason is called by today: itself, unless it was renamed.
+ *
+ * Takes any string, because that is what comes out of a stored row. An id
+ * that is neither current nor renamed is handed back untouched and typed as
+ * the union — the same tolerated fiction {@link parseSpamReasons} makes, and
+ * for the same reason: a verdict written by a newer version must still read,
+ * showing the row it does not recognise rather than swallowing it.
+ */
+export function canonicalReasonId(id: string): SpamReasonId {
+  return RENAMED_REASON_IDS[id] ?? (id as SpamReasonId);
+}
 
 export interface SpamReason {
   id: SpamReasonId;
@@ -214,20 +249,26 @@ export function isSpamScore(score: number | null | undefined): boolean {
  * good elements of a partly-bad array survive. A shield that throws on one bad
  * row is worse than one that shows less — the row it refuses to render is the
  * message the user is trying to look at.
+ *
+ * Ids that this package has since renamed come back under their current name
+ * (see {@link canonicalReasonId}), so a reader written against today's union
+ * handles a verdict stored by an older version without a special case.
  */
 export function parseSpamReasons(json: string | null | undefined): SpamReason[] {
   if (!json) return [];
   try {
     const parsed: unknown = JSON.parse(json);
     if (!Array.isArray(parsed)) return [];
-    return parsed.filter(
-      (reason): reason is SpamReason =>
-        !!reason &&
-        typeof reason === 'object' &&
-        typeof (reason as SpamReason).id === 'string' &&
-        typeof (reason as SpamReason).points === 'number' &&
-        typeof (reason as SpamReason).detail === 'string',
-    );
+    return parsed
+      .filter(
+        (reason): reason is SpamReason =>
+          !!reason &&
+          typeof reason === 'object' &&
+          typeof (reason as SpamReason).id === 'string' &&
+          typeof (reason as SpamReason).points === 'number' &&
+          typeof (reason as SpamReason).detail === 'string',
+      )
+      .map((reason) => ({ ...reason, id: canonicalReasonId(reason.id) }));
   } catch {
     return [];
   }

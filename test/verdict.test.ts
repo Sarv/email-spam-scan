@@ -2,6 +2,7 @@ import { describe, expect, it } from 'vitest';
 
 import {
   assessmentOf,
+  canonicalReasonId,
   isSpamScore,
   mergeAssessments,
   parseSpamReasons,
@@ -81,6 +82,24 @@ describe('parseSpamReasons', () => {
     expect(parseSpamReasons('42')).toEqual([]);
   });
 
+  // Regression: Sarv Inbox shipped these three ids before this package
+  // existed and they are sitting in stored verdicts on users' disks. A
+  // reader that switches on today's union must not fall through to a blank
+  // row for mail that was scored last year.
+  it('reads a verdict stored under the old ids under the current ones', () => {
+    const stored = JSON.stringify([
+      { id: 'ip-blocklisted', points: 4, detail: 'listed' },
+      { id: 'domain-blocklisted', points: 2, detail: 'listed' },
+      { id: 'user-reported', points: 3, detail: 'reported' },
+    ]);
+
+    expect(parseSpamReasons(stored).map((parsed) => parsed.id)).toEqual([
+      'reputation-ip-listed',
+      'reputation-domain-listed',
+      'reputation-user-reported',
+    ]);
+  });
+
   // Partial survival, deliberately: one bad element in an array of five should
   // cost the reader that one line, not the whole explanation.
   it('keeps the good elements of a partly-bad array', () => {
@@ -93,6 +112,22 @@ describe('parseSpamReasons', () => {
       { id: 'fake-reply', points: 2, detail: 42 },
     ]);
     expect(parseSpamReasons(json)).toEqual([reason]);
+  });
+});
+
+describe('canonicalReasonId', () => {
+  it('translates every id this package has renamed', () => {
+    expect(canonicalReasonId('ip-blocklisted')).toBe('reputation-ip-listed');
+    expect(canonicalReasonId('domain-blocklisted')).toBe('reputation-domain-listed');
+    expect(canonicalReasonId('user-reported')).toBe('reputation-user-reported');
+  });
+
+  // Regression: the table is a translation, not a filter. An id it has never
+  // heard of — one this package still uses, or one a newer version wrote —
+  // comes back unchanged rather than as undefined.
+  it('hands back anything it has no other name for', () => {
+    expect(canonicalReasonId('auth-failed')).toBe('auth-failed');
+    expect(canonicalReasonId('a-rule-from-a-later-release')).toBe('a-rule-from-a-later-release');
   });
 });
 
