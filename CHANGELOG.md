@@ -9,6 +9,15 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
+- **`stageOfReason` / `SPAM_REASON_STAGES`** (`/verdict`, no dependencies) —
+  which stage produced a stored reason: `header`, `content`, `attachment` or
+  `reputation`. For a consumer that scores a message in pieces, which every
+  mail client does: headers arrive at sync, the body on demand, so re-running
+  the body stages has to replace their own previous reasons rather than append
+  a second copy — and the headers that produced the rest of the verdict are
+  long gone by then. An id this version does not know returns `null`, meaning
+  "leave it alone", so a verdict written by a newer release does not lose
+  points on the way through an older reader.
 - **Brand marks** (`/brand`, `htmlparser2` + `tldts`) — `lookupBimi(domain,
   options)` resolves what a sender domain publishes about its own logo: the
   DMARC policy that gates it, the `default._bimi` record, the SVG itself, and
