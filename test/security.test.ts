@@ -212,6 +212,15 @@ describe('assessEmailSecurity — the Links row explains the badge', () => {
     expect(levelOf({ auth: auth(), html: '<p>Just a note.</p>' })).toBe('verified');
   });
 
+  // With no parsable From address there is no "home" to say the links stayed
+  // on, so the row stops at the question it CAN answer. Naming a domain here
+  // would mean inventing one.
+  it('claims nothing about staying home when the sender domain is unknown', () => {
+    expect(
+      detailOf({ fromAddress: null, html: anchor('Our docs', 'https://docs.example.org/x') }),
+    ).toBe('Link domains match what they show');
+  });
+
   it('counts and names several destinations, and caps the naming', () => {
     const html =
       anchor('a', 'https://one.example/a') +

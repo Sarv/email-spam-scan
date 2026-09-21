@@ -188,17 +188,17 @@ const authCheck = (
  * the reason the other lines are worth reading.
  */
 function linkPassDetail(
-  summary: LinkDomainSummary | null,
+  summary: LinkDomainSummary,
   stray: readonly OffDomainLink[],
   trustedCount: number,
   senderDomain: string | null,
 ): string {
-  if (summary && summary.linkCount === 0) return 'The sender wrote no links in this message';
+  if (summary.linkCount === 0) return 'The sender wrote no links in this message';
   const vetted = trustedCount
     ? ` (${trustedCount} pair${trustedCount > 1 ? 's' : ''} you trust)`
     : '';
   const honest = `Link domains match what they show${vetted}`;
-  if (!summary || !senderDomain) return honest;
+  if (!senderDomain) return honest;
   if (summary.offDomain.length === 0) return `${honest}, and every link stays on ${senderDomain}`;
   // Links DID leave, and the level is the top one anyway, because the reader
   // forgave each of them. Saying "every link stays on the domain" here would
@@ -328,10 +328,12 @@ export function assessEmailSecurity(input: SecurityInput): SecurityAssessment {
   // that reports only the deception test shows an identical row of ticks under
   // two different badges, and the difference then looks like a bug in the
   // shield rather than a fact about the mail.
-  const linkDomains = bodyLoaded ? summarizeLinkDomains(input.html, senderDomain) : null;
+  // An unloaded body summarises to nothing, which never reaches a reader: the
+  // branch below reports "not downloaded yet" on its own.
+  const linkDomains = summarizeLinkDomains(bodyLoaded ? input.html : null, senderDomain);
   const isVetted = (link: OffDomainLink): boolean =>
     link.shown.some((shown) => rules.trusted.has(key({ shown, actual: link.actual })));
-  const strayLinks = (linkDomains?.offDomain ?? []).filter((link) => !isVetted(link));
+  const strayLinks = linkDomains.offDomain.filter((link) => !isVetted(link));
 
   if (!bodyLoaded) {
     checks.push({
