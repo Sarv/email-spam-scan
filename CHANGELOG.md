@@ -7,6 +7,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.2.0] - 2026-09-21
+
 ### Added
 
 - **`linkDomains(body, options)`** (`/links`) — the registrable domains a
@@ -503,5 +505,6 @@ where these rules run on real mail at ingest.
   on the sender's own domain, and that must not be asserted about HTML nobody
   was able to read.
 
-[Unreleased]: https://github.com/Sarv/mailguard/compare/v0.1.0...HEAD
+[Unreleased]: https://github.com/Sarv/mailguard/compare/v0.2.0...HEAD
+[0.2.0]: https://github.com/Sarv/mailguard/compare/v0.1.0...v0.2.0
 [0.1.0]: https://github.com/Sarv/mailguard/releases/tag/v0.1.0
