@@ -17,12 +17,15 @@ on:
       - 'v*'
 
 permissions:
+  # `contents: write` is for the GitHub release at the end, and nothing else —
+  # `gh release create` writes a release object, which the API counts as
+  # repository content. The publish itself does not want it.
+  contents: write
   # `id-token: write` mints the OIDC token, and it now does two jobs: npm
   # exchanges it for the short-lived credential that AUTHORIZES the publish
   # (trusted publishing — there is no npm token in this workflow), and it backs
   # the provenance attestation, the signed record of which workflow, which
   # commit and which repo produced the tarball. Without it both fail.
-  contents: read
   id-token: write
 
 jobs:
@@ -80,6 +83,11 @@ jobs:
       # The whole pipeline before anything leaves the building. A published
       # version cannot be un-published after 72 hours, and cannot be re-published
       # at the same number ever — so this gate runs on the tag, not on trust.
+      # Lint and formatting run here too, because ci.yml runs them and a release
+      # gate that is weaker than the merge gate is the one thing this pipeline
+      # must never be. They are first because they are the fastest way to fail.
+      - run: pnpm lint
+      - run: pnpm format:check
       - run: pnpm type-check
       # Coverage, matching ci.yml: the 100% thresholds in vitest.config.ts only
       # fail the build when the coverage reporter runs, so a plain `pnpm test`
@@ -104,3 +112,44 @@ jobs:
       # removed and the workflow goes back to a token.
       - name: Publish
         run: npm publish --provenance --access public
+
+      # AFTER the publish, deliberately. npm is the irreversible half — a
+      # version number can never be reused — so nothing else runs until the
+      # tarball is actually on the registry. A release object, by contrast, can
+      # be edited or deleted all day, which makes it the safe thing to do last.
+      #
+      # Notes come out of CHANGELOG.md rather than being written a second time
+      # in the tag message or the release body. Keeping one source means the
+      # file a reader upgrades against and the notes GitHub mails to watchers
+      # cannot drift apart.
+      - name: Create the GitHub release
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          set -euo pipefail
+          version="${GITHUB_REF_NAME#v}"
+
+          # This version's section only: everything after its heading, stopping
+          # at the next `## ` — which is the previous release, or the
+          # `[Unreleased]` block if the heading was never added.
+          awk -v heading="## [${version}]" '
+            index($0, heading) == 1 { found = 1; next }
+            found && /^## / { exit }
+            found { print }
+          ' CHANGELOG.md > notes.md
+
+          # A prerelease tag (`v1.0.0-rc.1`) must not become the repo's
+          # "Latest" release — the same distinction npm draws with dist-tags.
+          prerelease=""
+          case "$version" in *-*) prerelease="--prerelease" ;; esac
+
+          # A missing CHANGELOG section is worth a warning, never a failure:
+          # by this point the package IS published and cannot be taken back, so
+          # exiting non-zero would leave a release on npm with no release here
+          # and a red tick suggesting the publish had failed.
+          if grep -q '[^[:space:]]' notes.md; then
+            gh release create "$GITHUB_REF_NAME" --title "$GITHUB_REF_NAME" --notes-file notes.md $prerelease
+          else
+            echo "::warning::no CHANGELOG section for ${version}; generating notes from the commit log"
+            gh release create "$GITHUB_REF_NAME" --title "$GITHUB_REF_NAME" --generate-notes $prerelease
+          fi
