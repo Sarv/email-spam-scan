@@ -8,11 +8,14 @@ import {
   parseSpamReasons,
   rollUpAuthStatus,
   spamVerdict,
+  stageOfReason,
+  SPAM_REASON_STAGES,
   SPAM_THRESHOLD,
   SUSPICIOUS_THRESHOLD,
   unknownAuthStatus,
   type AuthStatus,
   type SpamReason,
+  type SpamStage,
 } from '../src/verdict.js';
 
 /**
@@ -128,6 +131,94 @@ describe('canonicalReasonId', () => {
   it('hands back anything it has no other name for', () => {
     expect(canonicalReasonId('auth-failed')).toBe('auth-failed');
     expect(canonicalReasonId('a-rule-from-a-later-release')).toBe('a-rule-from-a-later-release');
+  });
+});
+
+/**
+ * Which stage owns which reason. The consumer this exists for scores a message
+ * in pieces — headers at sync, body on demand — and has to be able to strip
+ * its own previous body reasons before writing a re-scored verdict. Get the
+ * partition wrong and one rule is charged twice, which looks like nothing at
+ * all in a total.
+ */
+describe('SPAM_REASON_STAGES', () => {
+  // Regression: the partition itself, pinned id by id. The Record's type makes
+  // a NEW id fail to compile until it is classified; nothing but this list
+  // makes a WRONG classification fail, and a body rule filed under 'header'
+  // survives every re-score as a second copy of itself.
+  it('files every reason under the stage that emits it', () => {
+    const byStage = (stage: SpamStage): string[] =>
+      Object.entries(SPAM_REASON_STAGES)
+        .filter(([, value]) => value === stage)
+        .map(([id]) => id)
+        .sort();
+
+    expect(byStage('header')).toEqual([
+      'auth-failed',
+      'bulk-no-unsubscribe',
+      'date-skew',
+      'display-name-spoof',
+      'fake-reply',
+      'known-spammer',
+      'malformed-message-id',
+      'missing-date',
+      'missing-message-id',
+      'no-recipient',
+      'precedence-junk',
+      'reply-to-freemail',
+      'reply-to-mismatch',
+      'sender-invalid',
+      'sender-punycode',
+      'upstream-spam',
+    ]);
+    expect(byStage('content')).toEqual([
+      'content-hidden-text',
+      'content-shouting',
+      'content-spam-vocabulary',
+      'link-bare-ip',
+      'link-display-mismatch',
+      'link-punycode',
+      'link-userinfo',
+    ]);
+    expect(byStage('attachment')).toEqual([
+      'attachment-archive-executable',
+      'attachment-double-extension',
+      'attachment-encrypted-archive',
+      'attachment-executable',
+      'attachment-macro',
+      'attachment-name-spoof',
+      'attachment-type-mismatch',
+    ]);
+    expect(byStage('reputation')).toEqual([
+      'reputation-domain-listed',
+      'reputation-ip-listed',
+      'reputation-user-reported',
+    ]);
+  });
+});
+
+describe('stageOfReason', () => {
+  it('names the stage for a current id', () => {
+    expect(stageOfReason('auth-failed')).toBe('header');
+    expect(stageOfReason('content-shouting')).toBe('content');
+    expect(stageOfReason('attachment-macro')).toBe('attachment');
+    expect(stageOfReason('reputation-ip-listed')).toBe('reputation');
+  });
+
+  // Regression: a verdict stored before the rename carries the OLD id. Read
+  // as unclassified, it would be treated as somebody else's reason forever —
+  // and the reputation sweep's own reasons would survive its next re-score.
+  it('resolves a renamed id to its stage', () => {
+    expect(stageOfReason('ip-blocklisted')).toBe('reputation');
+    expect(stageOfReason('user-reported')).toBe('reputation');
+  });
+
+  // Regression: an id from a NEWER release must read as null, not as a guess.
+  // Callers treat null as "leave it alone", so a reason this version cannot
+  // place survives the re-score instead of quietly lowering the score.
+  it('returns null for an id it has never heard of', () => {
+    expect(stageOfReason('a-rule-from-a-later-release')).toBeNull();
+    expect(stageOfReason('')).toBeNull();
   });
 });
 

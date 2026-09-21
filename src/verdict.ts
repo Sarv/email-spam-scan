@@ -110,6 +110,76 @@ export function canonicalReasonId(id: string): SpamReasonId {
   return RENAMED_REASON_IDS[id] ?? (id as SpamReasonId);
 }
 
+/** Which part of the scan produced a reason. */
+export type SpamStage = 'header' | 'content' | 'attachment' | 'reputation';
+
+/**
+ * The stage each reason belongs to.
+ *
+ * A consumer that scores a whole message in one pass never needs this. One
+ * that scores it in PIECES does. A mail client fetches headers first and
+ * bodies later — often much later, on demand — so the body stages run against
+ * a verdict that is already stored, and re-running them (a re-fetch, a
+ * repaired charset, a second sweep) has to REPLACE their own previous reasons
+ * rather than append a second copy of each. Recomputing the whole verdict
+ * instead is not available to it: the headers it scored are long gone.
+ *
+ * A `Record` over the union rather than a list of ids, so a reason added to
+ * this package without being classified fails to compile here. Left to
+ * default, an unclassified id reads as "not mine" in every consumer's filter,
+ * and the bug that follows — one rule quietly charged twice — does not look
+ * like anything in the total.
+ */
+export const SPAM_REASON_STAGES: Readonly<Record<SpamReasonId, SpamStage>> = {
+  'upstream-spam': 'header',
+  'known-spammer': 'header',
+  'auth-failed': 'header',
+  'display-name-spoof': 'header',
+  'sender-punycode': 'header',
+  'sender-invalid': 'header',
+  'reply-to-freemail': 'header',
+  'reply-to-mismatch': 'header',
+  'missing-message-id': 'header',
+  'malformed-message-id': 'header',
+  'missing-date': 'header',
+  'date-skew': 'header',
+  'fake-reply': 'header',
+  'no-recipient': 'header',
+  'bulk-no-unsubscribe': 'header',
+  'precedence-junk': 'header',
+  'content-spam-vocabulary': 'content',
+  'content-shouting': 'content',
+  'content-hidden-text': 'content',
+  'link-display-mismatch': 'content',
+  'link-bare-ip': 'content',
+  'link-userinfo': 'content',
+  'link-punycode': 'content',
+  'attachment-executable': 'attachment',
+  'attachment-double-extension': 'attachment',
+  'attachment-name-spoof': 'attachment',
+  'attachment-type-mismatch': 'attachment',
+  'attachment-macro': 'attachment',
+  'attachment-archive-executable': 'attachment',
+  'attachment-encrypted-archive': 'attachment',
+  'reputation-ip-listed': 'reputation',
+  'reputation-domain-listed': 'reputation',
+  'reputation-user-reported': 'reputation',
+};
+
+/**
+ * The stage a stored reason came from, or `null` for an id this version has
+ * never heard of.
+ *
+ * `null` rather than a guess, and callers should read it as "leave it alone":
+ * a verdict written by a NEWER version of this package can carry a reason
+ * from a stage that did not exist yet, and dropping it would silently lower a
+ * score that a future release will recompute correctly. Renamed ids resolve
+ * first (see {@link canonicalReasonId}), so an old stored id finds its stage.
+ */
+export function stageOfReason(id: string): SpamStage | null {
+  return SPAM_REASON_STAGES[canonicalReasonId(id)] ?? null;
+}
+
 export interface SpamReason {
   id: SpamReasonId;
   points: number;

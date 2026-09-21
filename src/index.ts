@@ -161,13 +161,16 @@ export {
   parseSpamReasons,
   rollUpAuthStatus,
   spamVerdict,
+  stageOfReason,
   unknownAuthStatus,
+  SPAM_REASON_STAGES,
   SPAM_THRESHOLD,
   SUSPICIOUS_THRESHOLD,
   type AuthStatus,
   type SpamAssessment,
   type SpamReason,
   type SpamReasonId,
+  type SpamStage,
   type SpamVerdict,
 } from './verdict.js';
 export {

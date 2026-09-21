@@ -536,6 +536,26 @@ handles a verdict stored a year ago without a special case. An id it has never
 heard of is passed through untouched rather than dropped — a verdict written
 by a newer version still has to render.
 
+### Re-scoring a message you only have part of
+
+A mail client fetches headers first and bodies later, so the body stages run
+long after the header verdict was stored. Re-running them has to **replace**
+their own previous reasons, never append a second copy — and the headers that
+produced the rest of the verdict are gone by then, so recomputing the lot is
+not an option. `stageOfReason` is what makes that possible:
+
+```ts
+import { assessmentOf, mergeAssessments, parseSpamReasons, stageOfReason } from '@sarv-in/email-spam-scan/verdict';
+
+const kept = parseSpamReasons(row.spam_reasons).filter((reason) => stageOfReason(reason.id) !== 'content');
+const rescored = mergeAssessments(assessmentOf(kept), assessContentSignals({ subject, text, html }));
+```
+
+`stageOfReason` returns `null` for an id this version has never heard of —
+including one written by a NEWER release — and a caller should read that as
+"leave it alone" rather than as "not mine". `SPAM_REASON_STAGES` is the whole
+table if you want to partition reasons some other way.
+
 ## Origin IP: which address actually sent this
 
 `Received:` headers are appended by each hop, and every hop below your own
