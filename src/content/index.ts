@@ -1,5 +1,5 @@
 /**
- * The body-content entry point: `@sarv-in/email-spam-scan/content`.
+ * The body-content entry point: `@sarv-in/mailguard/content`.
  *
  * Costs `htmlparser2` and `tldts`, and nothing else — no address parser, no
  * freemail corpus. A consumer that has a body and wants it scored takes this;

@@ -3,7 +3,7 @@
  *
  * Zero third-party dependencies, by contract and by design — the whole stage
  * is a signature table, a filename reader and a zip directory walk, none of
- * which needs a package. That makes `@sarv-in/email-spam-scan/attachments`
+ * which needs a package. That makes `@sarv-in/mailguard/attachments`
  * safe anywhere: a renderer deciding whether to put a warning on a paperclip
  * icon gets the same answers as the scanner that filed the message, without
  * pulling in a MIME parser, an address parser or a public-suffix list.

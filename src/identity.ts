@@ -15,7 +15,7 @@
  * stops firing.
  *
  * Browser-safe by construction: the only import is `tldts`, which is pure.
- * Available as `@sarv-in/email-spam-scan/identity` so a renderer can take this
+ * Available as `@sarv-in/mailguard/identity` so a renderer can take this
  * rule without the scanner behind it.
  *
  * Domain comparison is done on the registrable domain (eTLD+1), so

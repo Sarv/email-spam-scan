@@ -456,5 +456,5 @@ where these rules run on real mail at ingest.
   on the sender's own domain, and that must not be asserted about HTML nobody
   was able to read.
 
-[Unreleased]: https://github.com/Sarv/email-spam-scan/compare/v0.1.0...HEAD
-[0.1.0]: https://github.com/Sarv/email-spam-scan/releases/tag/v0.1.0
+[Unreleased]: https://github.com/Sarv/mailguard/compare/v0.1.0...HEAD
+[0.1.0]: https://github.com/Sarv/mailguard/releases/tag/v0.1.0

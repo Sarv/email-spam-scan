@@ -1,4 +1,4 @@
-# Contributing to email-spam-scan
+# Contributing to mailguard
 
 Thanks for helping. Rules and lists are the whole point of an open-source spam
 scanner: the people who see a new campaign first are the people running mail
@@ -61,8 +61,8 @@ also means a bad entry is a bad entry for everyone.
 ## Getting set up
 
 ```bash
-git clone https://github.com/Sarv/email-spam-scan.git
-cd email-spam-scan
+git clone https://github.com/Sarv/mailguard.git
+cd mailguard
 pnpm install
 pnpm verify      # lint + type-check + test with coverage + build
 ```

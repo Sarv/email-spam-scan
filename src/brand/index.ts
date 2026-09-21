@@ -1,5 +1,5 @@
 /**
- * `@sarv-in/email-spam-scan/brand` — who a message says it is FROM, shown as
+ * `@sarv-in/mailguard/brand` — who a message says it is FROM, shown as
  * a mark: the BIMI logo a domain publishes, the Verified Mark Certificate
  * that turns that logo into a verified identity, and the favicon that stands
  * in when a domain publishes neither.

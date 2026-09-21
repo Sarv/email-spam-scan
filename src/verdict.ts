@@ -10,7 +10,7 @@
  * what the numbers mean and how to parse the reasons — and must not be made to
  * bundle a MIME parser, a public-suffix list and a word corpus to get it.
  *
- * Hence the `@sarv-in/email-spam-scan/verdict` entry point, which is browser-safe
+ * Hence the `@sarv-in/mailguard/verdict` entry point, which is browser-safe
  * by construction. The scorer imports these same constants, so the score a
  * scanner writes and the line a reader compares it against can never drift.
  */

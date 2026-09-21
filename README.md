@@ -1,16 +1,16 @@
-# email-spam-scan
+# mailguard
 
-[![npm version](https://img.shields.io/npm/v/@sarv-in/email-spam-scan.svg)](https://www.npmjs.com/package/@sarv-in/email-spam-scan)
-[![npm downloads](https://img.shields.io/npm/dm/@sarv-in/email-spam-scan.svg)](https://www.npmjs.com/package/@sarv-in/email-spam-scan)
-[![CI](https://github.com/Sarv/email-spam-scan/actions/workflows/ci.yml/badge.svg)](https://github.com/Sarv/email-spam-scan/actions/workflows/ci.yml)
-[![coverage 100%](https://img.shields.io/badge/coverage-100%25-brightgreen.svg)](https://github.com/Sarv/email-spam-scan/actions/workflows/ci.yml)
-[![license](https://img.shields.io/npm/l/@sarv-in/email-spam-scan.svg)](./LICENSE)
+[![npm version](https://img.shields.io/npm/v/@sarv-in/mailguard.svg)](https://www.npmjs.com/package/@sarv-in/mailguard)
+[![npm downloads](https://img.shields.io/npm/dm/@sarv-in/mailguard.svg)](https://www.npmjs.com/package/@sarv-in/mailguard)
+[![CI](https://github.com/Sarv/mailguard/actions/workflows/ci.yml/badge.svg)](https://github.com/Sarv/mailguard/actions/workflows/ci.yml)
+[![coverage 100%](https://img.shields.io/badge/coverage-100%25-brightgreen.svg)](https://github.com/Sarv/mailguard/actions/workflows/ci.yml)
+[![license](https://img.shields.io/npm/l/@sarv-in/mailguard.svg)](./LICENSE)
 
 Decide whether an email is spam, from the email itself.
 
-**npm:** [`@sarv-in/email-spam-scan`](https://www.npmjs.com/package/@sarv-in/email-spam-scan) ·
-**source:** [Sarv/email-spam-scan](https://github.com/Sarv/email-spam-scan) ·
-**issues:** [report one](https://github.com/Sarv/email-spam-scan/issues) ·
+**npm:** [`@sarv-in/mailguard`](https://www.npmjs.com/package/@sarv-in/mailguard) ·
+**source:** [Sarv/mailguard](https://github.com/Sarv/mailguard) ·
+**issues:** [report one](https://github.com/Sarv/mailguard/issues) ·
 **contributing:** [CONTRIBUTING.md](./CONTRIBUTING.md)
 
 You supply the headers — eventually the whole message — and it gives back a
@@ -57,11 +57,11 @@ did not check.
 ## Install
 
 ```bash
-npm install @sarv-in/email-spam-scan
+npm install @sarv-in/mailguard
 # or
-pnpm add @sarv-in/email-spam-scan
+pnpm add @sarv-in/mailguard
 # or
-yarn add @sarv-in/email-spam-scan
+yarn add @sarv-in/mailguard
 ```
 
 Node 20 or newer. TypeScript types ship with the package; ESM and CJS both work.
@@ -74,19 +74,19 @@ Twelve, so a browser bundle never has to carry what only a server needs.
 
 | Import | Dependencies | Use it for |
 | --- | --- | --- |
-| `@sarv-in/email-spam-scan` | `tldts`, `ipaddr.js`, `email-addresses`, `htmlparser2`, `postal-mime` | Everything. The Node entry — the scanner, all three stages, the header primitives. |
-| `@sarv-in/email-spam-scan/verdict` | **none** | Reading a stored score/reason back — in a renderer, a worker, anywhere. |
-| `@sarv-in/email-spam-scan/headers` | **none** | Reading raw header text: the lookup, and whether the sender declared itself bulk. |
-| `@sarv-in/email-spam-scan/attachments` | **none** | The attachment stage: filenames, magic bytes, zip directories. Nothing is unpacked, so nothing is needed to unpack it. |
-| `@sarv-in/email-spam-scan/identity` | `tldts` | The sender-spoof rule on its own. |
-| `@sarv-in/email-spam-scan/links` | `tldts`, `htmlparser2` | Deceptive-link detection. |
-| `@sarv-in/email-spam-scan/security` | `tldts`, `htmlparser2` | The five-level decision, for the UI that renders it. |
-| `@sarv-in/email-spam-scan/content` | `tldts`, `htmlparser2` | The body-content stage: vocabulary, quote stripping, link structure. |
-| `@sarv-in/email-spam-scan/quote` | **none** | Where somebody else's email begins: the reply/forward cut on its own, for a scorer or a contact miner. |
-| `@sarv-in/email-spam-scan/scan` | all of the above + `postal-mime` | `scan(rawMessage)` and the bulk stream. The only entry that costs a MIME parser. |
-| `@sarv-in/email-spam-scan/verify` | **none statically** — `mailauth`, an optional peer, is `import`ed on first use | Real SPF/DKIM/DMARC verification against DNS. One of the two entries that can make a network call. |
-| `@sarv-in/email-spam-scan/reputation` | `ipaddr.js` — `node:dns` is `import`ed on first use | Blocklist lookups for a sending address or a domain. Node only, and it queries nothing you did not name. |
-| `@sarv-in/email-spam-scan/brand` | `tldts`, `htmlparser2` — `@peculiar/x509` and `asn1js`, both optional peers, are `import`ed on first use | The sender's mark: the BIMI logo a domain publishes, the certificate that verifies it, and the favicon that stands in. Runs in a browser; DNS and HTTPS are injected. |
+| `@sarv-in/mailguard` | `tldts`, `ipaddr.js`, `email-addresses`, `htmlparser2`, `postal-mime` | Everything. The Node entry — the scanner, all three stages, the header primitives. |
+| `@sarv-in/mailguard/verdict` | **none** | Reading a stored score/reason back — in a renderer, a worker, anywhere. |
+| `@sarv-in/mailguard/headers` | **none** | Reading raw header text: the lookup, and whether the sender declared itself bulk. |
+| `@sarv-in/mailguard/attachments` | **none** | The attachment stage: filenames, magic bytes, zip directories. Nothing is unpacked, so nothing is needed to unpack it. |
+| `@sarv-in/mailguard/identity` | `tldts` | The sender-spoof rule on its own. |
+| `@sarv-in/mailguard/links` | `tldts`, `htmlparser2` | Deceptive-link detection. |
+| `@sarv-in/mailguard/security` | `tldts`, `htmlparser2` | The five-level decision, for the UI that renders it. |
+| `@sarv-in/mailguard/content` | `tldts`, `htmlparser2` | The body-content stage: vocabulary, quote stripping, link structure. |
+| `@sarv-in/mailguard/quote` | **none** | Where somebody else's email begins: the reply/forward cut on its own, for a scorer or a contact miner. |
+| `@sarv-in/mailguard/scan` | all of the above + `postal-mime` | `scan(rawMessage)` and the bulk stream. The only entry that costs a MIME parser. |
+| `@sarv-in/mailguard/verify` | **none statically** — `mailauth`, an optional peer, is `import`ed on first use | Real SPF/DKIM/DMARC verification against DNS. One of the two entries that can make a network call. |
+| `@sarv-in/mailguard/reputation` | `ipaddr.js` — `node:dns` is `import`ed on first use | Blocklist lookups for a sending address or a domain. Node only, and it queries nothing you did not name. |
+| `@sarv-in/mailguard/brand` | `tldts`, `htmlparser2` — `@peculiar/x509` and `asn1js`, both optional peers, are `import`ed on first use | The sender's mark: the BIMI logo a domain publishes, the certificate that verifies it, and the favicon that stands in. Runs in a browser; DNS and HTTPS are injected. |
 
 The split exists because the common case in a mail client is displaying a
 verdict that was computed at ingest, hours ago, on a server. That side needs
@@ -107,7 +107,7 @@ to a browser bundle.
 Hand it a message and it answers:
 
 ```ts
-import { scan } from '@sarv-in/email-spam-scan/scan';
+import { scan } from '@sarv-in/mailguard/scan';
 
 const result = await scan(await readFile('message.eml'), { authserv: 'mx.example.com' });
 
@@ -135,7 +135,7 @@ import {
   extractOriginIp,
   assessSender,
   spamVerdict,
-} from '@sarv-in/email-spam-scan';
+} from '@sarv-in/mailguard';
 
 const block = extractAuthHeaderBlock(rawHeaderText);
 const auth = parseAuthenticationHeaders(block);
@@ -153,7 +153,7 @@ spamVerdict(6); // 'spam'
 Or score the whole thing at once:
 
 ```ts
-import { assessSpamSignals, headerLookupFromText } from '@sarv-in/email-spam-scan';
+import { assessSpamSignals, headerLookupFromText } from '@sarv-in/mailguard';
 
 const { score, reasons, isSpam } = assessSpamSignals({
   fromName: 'PayPal Support',
@@ -229,7 +229,7 @@ should stay small enough to store.
 message:
 
 ```ts
-import { scanMany } from '@sarv-in/email-spam-scan/scan';
+import { scanMany } from '@sarv-in/mailguard/scan';
 
 for await (const { id, result, error } of scanMany(messages, { concurrency: 8 })) {
   if (error) log.warn(`${id} could not be read: ${error.message}`);
@@ -519,7 +519,7 @@ Score it once, store the number and the reasons, and read them back from
 anywhere — including a browser — with no dependencies:
 
 ```ts
-import { spamVerdict, parseSpamReasons } from '@sarv-in/email-spam-scan/verdict';
+import { spamVerdict, parseSpamReasons } from '@sarv-in/mailguard/verdict';
 
 spamVerdict(row.spam_score);            // 'spam' | 'suspicious' | 'clean' | null
 parseSpamReasons(row.spam_reasons);     // SpamReason[], [] if absent or corrupt
@@ -545,7 +545,7 @@ produced the rest of the verdict are gone by then, so recomputing the lot is
 not an option. `stageOfReason` is what makes that possible:
 
 ```ts
-import { assessmentOf, mergeAssessments, parseSpamReasons, stageOfReason } from '@sarv-in/email-spam-scan/verdict';
+import { assessmentOf, mergeAssessments, parseSpamReasons, stageOfReason } from '@sarv-in/mailguard/verdict';
 
 const kept = parseSpamReasons(row.spam_reasons).filter((reason) => stageOfReason(reason.id) !== 'content');
 const rescored = mergeAssessments(assessmentOf(kept), assessContentSignals({ subject, text, html }));
@@ -593,8 +593,8 @@ entry computes one: SPF, DKIM and DMARC against live DNS, over the original
 unmodified bytes.
 
 ```ts
-import { verifyAuthentication } from '@sarv-in/email-spam-scan/verify';
-import { scan } from '@sarv-in/email-spam-scan/scan';
+import { verifyAuthentication } from '@sarv-in/mailguard/verify';
+import { scan } from '@sarv-in/mailguard/scan';
 
 const verified = await verifyAuthentication(raw, {
   ip: '198.51.100.7', // the address that connected — SPF is a question about it
@@ -672,8 +672,8 @@ import {
   checkReputation,
   SPAMHAUS_ZEN,
   SPAMCOP,
-} from '@sarv-in/email-spam-scan/reputation';
-import { scan } from '@sarv-in/email-spam-scan/scan';
+} from '@sarv-in/mailguard/reputation';
+import { scan } from '@sarv-in/mailguard/scan';
 
 const result = await scan(raw);
 
@@ -824,7 +824,7 @@ reaches the network and runs in a browser, because DNS and HTTPS are injected
 rather than imported.
 
 ```ts
-import { lookupBimi, discoverFavicon } from '@sarv-in/email-spam-scan/brand';
+import { lookupBimi, discoverFavicon } from '@sarv-in/mailguard/brand';
 
 const mark = await lookupBimi('brand.example');
 if (mark.status === 'verified') {
@@ -884,7 +884,7 @@ are, but not nothing.
 
 ## API
 
-### Verdict — `@sarv-in/email-spam-scan/verdict`
+### Verdict — `@sarv-in/mailguard/verdict`
 
 - `SPAM_THRESHOLD: 5`, `SUSPICIOUS_THRESHOLD: 3`
 - `spamVerdict(score): 'spam' | 'suspicious' | 'clean' | null`
@@ -896,14 +896,14 @@ are, but not nothing.
 - `unknownAuthStatus(): AuthStatus`, `rollUpAuthStatus(components)` — the one rollup both the header reader and the DNS verifier use
 - `type SpamReason`, `SpamReasonId`, `SpamVerdict`, `SpamAssessment`, `AuthStatus`
 
-### Identity — `@sarv-in/email-spam-scan/identity`
+### Identity — `@sarv-in/mailguard/identity`
 
 - `registrableDomain(input): string | null` — eTLD+1
 - `domainOfAddress(address): string | null`
 - `domainsInText(text): string[]`
 - `assessSender(name, address): PhishingReason[]`
 
-### Links — `@sarv-in/email-spam-scan/links`
+### Links — `@sarv-in/mailguard/links`
 
 - `linkMismatches(html): LinkMismatch[]` — `{ shown, actual }`, de-duplicated, capped at three
 - `assessLinks(html): PhishingReason[]` — the same, phrased for a human
@@ -911,7 +911,7 @@ are, but not nothing.
 - `assessPhishing({ fromName, fromAddress, html }): PhishingAssessment`
 - `LINK_WRAPPER_DOMAINS: Set<string>`
 
-### Scan — `@sarv-in/email-spam-scan/scan`
+### Scan — `@sarv-in/mailguard/scan`
 
 - `scan(raw, options?): Promise<ScanResult>` — the whole pipeline over one message
 - `scanParsed(email, options?): ScanResult` — the same, over an already-parsed message
@@ -919,7 +919,7 @@ are, but not nothing.
 - `trustedAuthHeaders(headerLines, authserv?): string` — which verdicts survived
 - `type ScanOptions`, `ScanResult`, `ScannedMessage`, `RawMessage`, `BulkScanInput`, `BulkScanOptions`, `BulkScanResult`
 
-### Verify — `@sarv-in/email-spam-scan/verify`
+### Verify — `@sarv-in/mailguard/verify`
 
 Needs the optional peer `mailauth`; nothing else in the package does.
 
@@ -927,7 +927,7 @@ Needs the optional peer `mailauth`; nothing else in the package does.
 - `authVerificationFrom(result): AuthVerification` — the mapping alone, over a `mailauth` result you already have
 - `type VerifyOptions`, `AuthVerification`, `VerifiedSignature`, `VerifyInput`, `DnsResolver`
 
-### Reputation — `@sarv-in/email-spam-scan/reputation`
+### Reputation — `@sarv-in/mailguard/reputation`
 
 Node only; `node:dns` is imported on first use. No zone is ever queried unless
 you name it.
@@ -942,7 +942,7 @@ you name it.
 - `readBlocklistCodes(blocklist, codes): CodeReading` — what a set of return codes means
 - `type Blocklist`, `BlocklistCode`, `BlocklistCategory`, `BlocklistKind`, `BlocklistHit`, `CodeReading`, `DnsQuery`, `ReputationOptions`, `ReputationBatchOptions`, `AssessReputationOptions`, `ReputationResult`, `ReputationTarget`, `ReputationLookupError`
 
-### Brand — `@sarv-in/email-spam-scan/brand`
+### Brand — `@sarv-in/mailguard/brand`
 
 Runs anywhere; DNS and HTTPS are injected. `@peculiar/x509` and `asn1js` are
 optional peers, imported on first use, and only the certificate check needs
@@ -960,7 +960,7 @@ them.
 - `BIMI_SELECTOR`, `BIMI_LOGO_MAX_BYTES`, `BIMI_EVIDENCE_MAX_BYTES`, `FAVICON_MAX_BYTES`, `HOMEPAGE_MAX_BYTES`, `BIMI_EKU_OID`, `LOGOTYPE_EXTENSION_OID`
 - `type BimiLookup`, `BimiOptions`, `BimiStatus`, `BimiRecord`, `DmarcRecord`, `DmarcPolicyValue`, `VmcResult`, `VmcStatus`, `ValidateVmcOptions`, `SvgCheck`, `LogotypeEvidence`, `MarkVerifyingAuthorityRoot`, `FaviconResult`, `FaviconStatus`, `FaviconOptions`, `IconCandidate`, `FetchLike`, `FetchResponse`, `FetchedBytes`, `FetchBoundedOptions`
 
-### Content — `@sarv-in/email-spam-scan/content`
+### Content — `@sarv-in/mailguard/content`
 
 - `assessContentSignals(input): SpamAssessment` — the whole stage
 - `bodyContent(input): BodyContent` — `{ words, anchors, hiddenText }`, what the rules saw
@@ -971,7 +971,7 @@ them.
 - `longestShoutRun(text): number`
 - `SPAM_PHRASE_GROUPS`, `VOCABULARY_CAP`
 
-### Quote — `@sarv-in/email-spam-scan/quote`
+### Quote — `@sarv-in/mailguard/quote`
 
 Zero dependencies, and the one entry here that is not about spam at all: a reply
 carries the mail it answers, and almost nothing you want to do with a body
@@ -981,7 +981,7 @@ should be done to somebody else's half of it.
 - `ownWords(text): string` — the same cut, with the signature and the client footer removed too. What a scorer wants: a job title and a phone number are not an argument
 - `QUOTE_MARKERS: readonly RegExp[]` — the markers both cuts share, exported so you can say which one fired
 
-### Attachments — `@sarv-in/email-spam-scan/attachments`
+### Attachments — `@sarv-in/mailguard/attachments`
 
 Zero dependencies: nothing here unpacks anything, so there is nothing to unpack
 it with.
@@ -995,14 +995,14 @@ it with.
 - `asBytes(content): Uint8Array | null` — one correct view over every parser's shape
 - `EXECUTABLE_EXTENSIONS`, `ARCHIVE_EXECUTABLE_EXTENSIONS`, `ARCHIVE_EXTENSIONS`, `MACRO_ENABLED_EXTENSIONS`, `DECOY_EXTENSIONS`
 
-### Security — `@sarv-in/email-spam-scan/security`
+### Security — `@sarv-in/mailguard/security`
 
 - `assessEmailSecurity(input): SecurityAssessment`
 - `worstLevel(levels): SecurityLevel`
 - `LEVEL_RANK`, `linkRuleKey(senderDomain, shown, actual)`, `parseAuthStatus(json)`
 - `EMPTY_RULES`, `type LinkRuleSets`, `SecurityCheck`, `CheckStatus`, `BrandIdentity` — what the `bimi` input needs of a `/brand` lookup
 
-### Header reading — `@sarv-in/email-spam-scan/headers`
+### Header reading — `@sarv-in/mailguard/headers`
 
 Zero dependencies, so a browser bundle can ask these questions without importing
 the scanner.
@@ -1013,7 +1013,7 @@ the scanner.
 - `parseAuthenticationHeaders(block): AuthStatus`
 - `receivedAt(lines): number | null`, `receivedAtFromLine(line)` — delivery time from the trace
 
-### Rules and scoring — `@sarv-in/email-spam-scan`
+### Rules and scoring — `@sarv-in/mailguard`
 
 - `extractOriginIp(sources): string | null` — reads headers, but needs an IP parser
 - `originIpFromAuthHeaders(block)`, `originIpFromReceived(lines)`

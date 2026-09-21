@@ -6,7 +6,7 @@
  * reads the bytes it was handed and nothing more. This module is the one
  * exception, and it is deliberately hard to reach by accident.
  *
- *   - It is its own entry point (`@sarv-in/email-spam-scan/verify`), so
+ *   - It is its own entry point (`@sarv-in/mailguard/verify`), so
  *     nothing that imports the scanner inherits it.
  *   - The DNS work is done by `mailauth`, an OPTIONAL peer dependency loaded
  *     through a dynamic import. A plain install of this package does not pull

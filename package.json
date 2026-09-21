@@ -1,15 +1,15 @@
 {
-  "name": "@sarv-in/email-spam-scan",
+  "name": "@sarv-in/mailguard",
   "version": "0.1.0",
   "description": "Explainable spam and phishing signals for email, computed offline from the message itself. Reads SPF/DKIM/DMARC results, sender-domain spoofing and the true origin IP out of the headers, and returns a score with human-readable reasons.",
   "license": "MIT",
   "repository": {
     "type": "git",
-    "url": "git+https://github.com/Sarv/email-spam-scan.git"
+    "url": "git+https://github.com/Sarv/mailguard.git"
   },
-  "homepage": "https://github.com/Sarv/email-spam-scan#readme",
+  "homepage": "https://github.com/Sarv/mailguard#readme",
   "bugs": {
-    "url": "https://github.com/Sarv/email-spam-scan/issues"
+    "url": "https://github.com/Sarv/mailguard/issues"
   },
   "type": "module",
   "files": [
