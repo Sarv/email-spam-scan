@@ -20,6 +20,7 @@ import {
   anchorMismatches,
   linkTarget,
   shownDomains,
+  urlsInText,
   LINK_WRAPPER_DOMAINS,
   type LinkMismatch,
 } from './urls.js';
@@ -149,6 +150,100 @@ export function linkDomainsAllMatch(
   return summarizeLinkDomains(html, senderDomain).offDomain.every(
     (link) => isVetted?.(link) === true,
   );
+}
+
+/**
+ * Distinct link domains one message contributes, by default.
+ *
+ * A newsletter links to a hundred things and a spam blast to a thousand; the
+ * first few a reader would meet are the ones worth asking about, and an
+ * unbounded list would turn one message into a hundred network lookups.
+ */
+export const LINK_DOMAINS_MAX = 20;
+
+export interface LinkDomainsOptions {
+  /**
+   * Registrable domains to leave out — the sender's own, normally, because
+   * whatever judges the sender has already judged it.
+   */
+  exclude?: readonly (string | null | undefined)[];
+  /** Cap on how many distinct domains come back. Default {@link LINK_DOMAINS_MAX}. */
+  max?: number;
+  /** Include links inside quoted history. Default false — see below. */
+  includeQuoted?: boolean;
+  /** Include ESP and shortener domains. Default false — see below. */
+  includeWrappers?: boolean;
+}
+
+/** Does this body have markup in it, or is it prose that happens to contain `<`? */
+const looksLikeHtml = (body: string): boolean => /<[a-z!/]/i.test(body);
+
+/** Every destination in the body, in document order, as written. */
+function linkCandidates(body: string, includeQuoted: boolean): string[] {
+  if (!looksLikeHtml(body)) return urlsInText(body);
+  const extract = extractHtml(body);
+  const written = extract.links
+    .filter((link) => includeQuoted || !link.quoted)
+    .map((link) => link.href);
+  // A URL typed into an HTML body and never wrapped in an anchor is still a
+  // link: every mail client autolinks it. Reading only the markup would let
+  // the same address count in a plain-text message and vanish in an HTML one,
+  // which is a one-line evasion. `text` is the sender's own visible words, so
+  // this inherits the quoted and hidden-text exclusions rather than repeating
+  // them.
+  const typed = urlsInText(includeQuoted ? `${extract.text} ${extract.quotedText}` : extract.text);
+  return [...written, ...typed];
+}
+
+/**
+ * The registrable domains a message LINKS to — the input a reputation check
+ * needs, as distinct from the domain it was SENT from.
+ *
+ * A phish is rarely sent from a listed domain; it links to one. The sender can
+ * be a clean mailbox at a clean host and the payload still a link to a
+ * harvesting page, so these domains are looked up the same way a sender's is,
+ * against the same lists.
+ *
+ * Three exclusions, each of which turns a noisy list into a useful one:
+ *
+ * - **Quoted history is not the sender's.** A reply carries the mail it
+ *   answers, links and all. Charging the forwarder for the phish they
+ *   forwarded is the mistake {@link linkDomainsAllMatch} avoids for the same
+ *   reason, and here it is worse: the forwarder's own message gets the points.
+ * - **Link wrappers are carriers, not destinations.** Marketing mail routes
+ *   every link through an ESP or a shortener, so without this the cap fills
+ *   with sendgrid.net and t.co before a real destination is reached — and the
+ *   day one of those lands on a blocklist, every newsletter that month is
+ *   charged for it. See {@link LINK_WRAPPER_DOMAINS}.
+ * - **The sender's own domain**, via `exclude`, because the sender stage
+ *   already asked about it.
+ *
+ * A link to a bare IP contributes nothing: there is no registrable domain to
+ * look up. That is a signal in itself, and a structural one — {@link
+ * linkTarget} reports `isIp` for a caller that wants to charge for it.
+ */
+export function linkDomains(
+  body: string | null | undefined,
+  options: LinkDomainsOptions = {},
+): string[] {
+  if (!body || !body.trim()) return [];
+  const max = options.max ?? LINK_DOMAINS_MAX;
+  if (max <= 0) return [];
+  const excluded = new Set(
+    (options.exclude ?? []).map((domain) => (domain ?? '').trim().toLowerCase()).filter(Boolean),
+  );
+  const found: string[] = [];
+  const seen = new Set<string>();
+  for (const href of linkCandidates(body, options.includeQuoted === true)) {
+    const domain = linkTarget(href)?.domain;
+    if (domain === undefined || domain === null) continue;
+    if (options.includeWrappers !== true && LINK_WRAPPER_DOMAINS.has(domain)) continue;
+    if (excluded.has(domain) || seen.has(domain)) continue;
+    seen.add(domain);
+    found.push(domain);
+    if (found.length >= max) break;
+  }
+  return found;
 }
 
 /**

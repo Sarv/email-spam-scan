@@ -4,8 +4,9 @@ import { collapseWhitespace, extractHtml } from '../src/content/html-text.js';
 
 describe('extractHtml', () => {
   it('returns nothing for no HTML at all', () => {
-    expect(extractHtml(null)).toEqual({ text: '', quotedText: '', hiddenText: '', anchors: [] });
-    expect(extractHtml('')).toEqual({ text: '', quotedText: '', hiddenText: '', anchors: [] });
+    const nothing = { text: '', quotedText: '', hiddenText: '', anchors: [], links: [] };
+    expect(extractHtml(null)).toEqual(nothing);
+    expect(extractHtml('')).toEqual(nothing);
   });
 
   // Regression: without a separator between block elements, `<p>pay</p><p>pal</p>`
@@ -127,6 +128,85 @@ describe('extractHtml', () => {
   it('decodes entities, because that is what the reader reads', () => {
     expect(extractHtml('<p>caf&eacute; &amp; bar</p>').text).toBe('café & bar');
     expect(extractHtml('<p>&#118;erify your password</p>').text).toBe('verify your password');
+  });
+});
+
+describe('extractHtml — links', () => {
+  // Regression: an image map is a click target with no text, so it has no
+  // anchor to be read as one; miss it and a mail whose only link is a picture
+  // reports no destinations at all.
+  it('counts an image map area as a destination', () => {
+    const extract = extractHtml('<map><area href="https://evil.ru/go" coords="0,0,10,10"></map>');
+    expect(extract.links).toEqual([{ href: 'https://evil.ru/go', quoted: false, from: 'area' }]);
+    expect(extract.anchors).toEqual([]);
+  });
+
+  // Regression: a form action is where a credential-harvesting page posts what
+  // the reader typed — the most consequential destination in a phishing mail,
+  // and the one that is never an anchor.
+  it('counts where a form would post', () => {
+    const extract = extractHtml('<form action="https://harvest.example/post"><input></form>');
+    expect(extract.links).toEqual([
+      { href: 'https://harvest.example/post', quoted: false, from: 'form' },
+    ]);
+  });
+
+  // Regression: `links` is the superset `anchors` is not — widening `anchors`
+  // instead would have changed what the deceptive-link check reads.
+  it('keeps every destination in document order, anchors included', () => {
+    const extract = extractHtml(
+      '<a href="https://one.example">one</a>' +
+        '<form action="https://two.example"></form>' +
+        '<area href="https://three.example">',
+    );
+    expect(extract.links.map((link) => link.from)).toEqual(['a', 'form', 'area']);
+    expect(extract.links.map((link) => link.href)).toEqual([
+      'https://one.example',
+      'https://two.example',
+      'https://three.example',
+    ]);
+  });
+
+  // Regression: a reply carries the mail it answers, links and all. Without
+  // the flag the forwarder gets charged for the phish they forwarded.
+  it('flags the destinations that came from quoted history', () => {
+    const extract = extractHtml(
+      '<p><a href="https://mine.example">mine</a></p>' +
+        '<blockquote><a href="https://theirs.example">theirs</a></blockquote>' +
+        '<div class="x_gmail_quote"><form action="https://alsotheirs.example"></form></div>',
+    );
+    expect(extract.links).toEqual([
+      { href: 'https://mine.example', quoted: false, from: 'a' },
+      { href: 'https://theirs.example', quoted: true, from: 'a' },
+      { href: 'https://alsotheirs.example', quoted: true, from: 'form' },
+    ]);
+  });
+
+  // Regression: an `<a>` with no href is a named jump target, and a `<form>`
+  // with no action posts to the page it is already on. Neither is a place a
+  // mail can send anybody, and an empty string would be one more candidate to
+  // spend the domain cap on.
+  it('ignores an element that offers no destination', () => {
+    expect(extractHtml('<a name="top">top</a><form></form><area>').links).toEqual([]);
+    expect(extractHtml('<a href="">x</a><form action=""></form>').links).toEqual([]);
+  });
+
+  // Regression: an unclosed `<form>` still names where it would post. Waiting
+  // for a closing tag, as anchors must, would drop it.
+  it('records a destination even when the element is never closed', () => {
+    expect(extractHtml('<form action="https://harvest.example">').links).toHaveLength(1);
+  });
+
+  // Regression: `<iframe src>` and `<img src>` are fetched by the client, not
+  // navigated to by the reader. Counting them would put every tracking
+  // pixel's host into the answer, which on ordinary marketing mail is most of
+  // the hosts there are.
+  it('leaves out what the client fetches rather than what the reader clicks', () => {
+    const extract = extractHtml(
+      '<img src="https://pixel.example/t.gif"><iframe src="https://frame.example"></iframe>' +
+        '<link href="https://style.example/a.css">',
+    );
+    expect(extract.links).toEqual([]);
   });
 });
 

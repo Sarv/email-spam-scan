@@ -3,9 +3,11 @@ import { describe, expect, it } from 'vitest';
 import {
   assessLinks,
   assessPhishing,
+  linkDomains,
   linkDomainsAllMatch,
   linkMismatches,
   summarizeLinkDomains,
+  LINK_DOMAINS_MAX,
   LINK_WRAPPER_DOMAINS,
 } from '../src/links.js';
 
@@ -267,5 +269,135 @@ describe('LINK_WRAPPER_DOMAINS', () => {
       expect(domain, domain).toBe(domain.toLowerCase());
       expect(domain, domain).toContain('.');
     }
+  });
+});
+
+describe('linkDomains', () => {
+  it('has nothing to say about an empty body', () => {
+    expect(linkDomains(null)).toEqual([]);
+    expect(linkDomains(undefined)).toEqual([]);
+    expect(linkDomains('   \n  ')).toEqual([]);
+  });
+
+  it('reduces every destination to its registrable domain', () => {
+    expect(linkDomains('<a href="https://mail.evil.ru/go?x=1">click</a>')).toEqual(['evil.ru']);
+  });
+
+  // Regression: a phish is rarely SENT from a listed domain; it links to one.
+  // `<area>` and `<form action>` are the two destinations that are never
+  // anchors, and the deceptive-link check does not read either.
+  it('reads image maps and form actions, not just anchors', () => {
+    const body =
+      '<a href="https://one.example">one</a>' +
+      '<area href="https://two.example">' +
+      '<form action="https://three.example"></form>';
+    expect(linkDomains(body)).toEqual(['one.example', 'two.example', 'three.example']);
+  });
+
+  // Regression: a reply carries the mail it answers. Charging the forwarder
+  // for the phish they forwarded is the mistake this exists to avoid.
+  it('leaves quoted history out, unless asked for it', () => {
+    const body =
+      '<p><a href="https://mine.example">mine</a></p>' +
+      '<blockquote><a href="https://theirs.example">theirs</a></blockquote>';
+    expect(linkDomains(body)).toEqual(['mine.example']);
+    expect(linkDomains(body, { includeQuoted: true })).toEqual(['mine.example', 'theirs.example']);
+  });
+
+  // Regression: marketing mail routes every link through an ESP or a
+  // shortener. Without this the cap fills with sendgrid.net and t.co before a
+  // real destination is reached — and the day one of those lands on a
+  // blocklist, every newsletter that month is charged for it.
+  it('skips the carriers and keeps the destinations', () => {
+    const body =
+      '<a href="https://u123.ct.sendgrid.net/ls/click?u=x">offer</a>' +
+      '<a href="https://t.co/abc">more</a>' +
+      '<a href="https://shop.example/sale">shop</a>';
+    expect(linkDomains(body)).toEqual(['shop.example']);
+    expect(linkDomains(body, { includeWrappers: true })).toEqual([
+      'sendgrid.net',
+      't.co',
+      'shop.example',
+    ]);
+  });
+
+  it('skips the domains it was told to skip, whatever their case', () => {
+    const body = '<a href="https://sender.example/a">a</a><a href="https://other.example">b</a>';
+    expect(linkDomains(body, { exclude: ['Sender.Example', null, undefined, ' '] })).toEqual([
+      'other.example',
+    ]);
+  });
+
+  it('reports each domain once, in the order the reader would meet it', () => {
+    const body =
+      '<a href="https://a.example/1">1</a>' +
+      '<a href="https://b.example/1">2</a>' +
+      '<a href="https://a.example/2">3</a>';
+    expect(linkDomains(body)).toEqual(['a.example', 'b.example']);
+  });
+
+  // Regression: a spam blast links to a thousand things. An unbounded list
+  // would turn one message into a thousand network lookups.
+  it('stops at the cap', () => {
+    const many = Array.from(
+      { length: LINK_DOMAINS_MAX + 5 },
+      (_unused, index) => `<a href="https://d${index}.example">x</a>`,
+    ).join('');
+    expect(linkDomains(many)).toHaveLength(LINK_DOMAINS_MAX);
+    expect(linkDomains(many, { max: 3 })).toEqual(['d0.example', 'd1.example', 'd2.example']);
+    expect(linkDomains(many, { max: 0 })).toEqual([]);
+    expect(linkDomains(many, { max: -1 })).toEqual([]);
+  });
+
+  // Regression: `mailto:`, `tel:` and `#anchor` are not places to be sent, and
+  // a bare IP has no registrable domain to ask a blocklist about.
+  it('ignores what cannot be looked up', () => {
+    const body =
+      '<a href="mailto:x@evil.ru">mail</a>' +
+      '<a href="tel:+15550100">call</a>' +
+      '<a href="#top">top</a>' +
+      '<a href="http://203.0.113.9/login">ip</a>' +
+      '<a href="not a url">junk</a>';
+    expect(linkDomains(body)).toEqual([]);
+  });
+
+  // Regression: an href split by entities or quoted oddly is exactly the shape
+  // a spammer reaches for. This is why the body is parsed rather than
+  // pattern-matched.
+  it('reads an href the way a mail client would, not the way a regex would', () => {
+    expect(linkDomains('<a href="https://evil.example/a&amp;b">paypal.com</a>')).toEqual([
+      'evil.example',
+    ]);
+    expect(linkDomains('<a href=https://bare.example/path>x</a>')).toEqual(['bare.example']);
+  });
+
+  // Regression: a bare hostname with no public suffix has no registrable
+  // domain to ask a blocklist about, and asking one about `localhost` would
+  // leak the fact that the mail was opened.
+  it('ignores a host that is not a public domain', () => {
+    expect(linkDomains('<a href="https://localhost/x">l</a>')).toEqual([]);
+  });
+
+  it('reads a plain-text body with the same rules', () => {
+    expect(linkDomains('see https://shop.example/sale. and https://t.co/x')).toEqual([
+      'shop.example',
+    ]);
+  });
+
+  // Regression: a URL typed into an HTML body and never wrapped in an anchor
+  // is still a link — every mail client autolinks it. Reading only the markup
+  // would let the same address count in a plain-text message and vanish in an
+  // HTML one, which is a one-line evasion.
+  it('reads a bare URL written into an HTML body', () => {
+    expect(linkDomains('<p>go to https://evil.ru/login now</p>')).toEqual(['evil.ru']);
+  });
+
+  // Regression: the visible text of an HTML body already has quoted history
+  // and invisible text removed, so the bare-URL path inherits both exclusions
+  // rather than reopening them.
+  it('does not let a bare URL in quoted history back in', () => {
+    const body = '<p>hi</p><blockquote>see https://theirs.example/x</blockquote>';
+    expect(linkDomains(body)).toEqual([]);
+    expect(linkDomains(body, { includeQuoted: true })).toEqual(['theirs.example']);
   });
 });

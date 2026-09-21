@@ -13,7 +13,13 @@ export {
   type BodyContent,
   type ContentSignalInput,
 } from './rules.js';
-export { collapseWhitespace, extractHtml, type HtmlAnchor, type HtmlExtract } from './html-text.js';
+export {
+  collapseWhitespace,
+  extractHtml,
+  type HtmlAnchor,
+  type HtmlExtract,
+  type HtmlLink,
+} from './html-text.js';
 export { ownWords, stripQuotedTail, QUOTE_MARKERS } from './quote.js';
 export {
   containsPhrase,

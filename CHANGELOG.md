@@ -9,6 +9,28 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
+- **`linkDomains(body, options)`** (`/links`) — the registrable domains a
+  message links TO, which is the input a reputation check needs and a
+  different question from the domain it was sent FROM: a phish is rarely sent
+  from a listed domain, it links to one. Reads anchors, image-map `<area>`
+  elements and `<form action>` — the last being where a credential-harvesting
+  page posts what the reader typed, the most consequential destination in a
+  phishing mail and the one that is never an anchor — plus bare URLs typed
+  into an HTML body, which every client autolinks. Quoted history and link
+  wrappers are excluded by default (`includeQuoted`, `includeWrappers` to
+  override): charging a forwarder for the phish they forwarded is wrong, and
+  without the wrapper list the cap fills with `sendgrid.net` and `t.co` before
+  a real destination is reached. Capped at `LINK_DOMAINS_MAX` (20) distinct
+  domains, in document order.
+- **`HtmlExtract.links`** (`/content`) — every navigable destination in a
+  document, in order, each flagged `quoted` and tagged with the element that
+  offered it. Wider than `anchors` on purpose and answering a different
+  question: an anchor is read for the pair a reader sees, words and
+  destination, so the deceptive-link check needs exactly the elements that
+  have visible words; "where could this message send me" has no such limit.
+  `<iframe src>` and `<img src>` are deliberately absent — the client fetches
+  those, the reader does not navigate to them, and counting them would put
+  every tracking pixel's host into the answer.
 - **`summarizeLinkDomains(html, senderDomain)`** (`/links`) — the counted form
   of `linkDomainsAllMatch`: how many links the sender wrote, and which ones
   leave their domain, each carrying the domains its text named. A boolean can

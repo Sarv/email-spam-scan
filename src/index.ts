@@ -86,9 +86,12 @@ export {
 export {
   assessLinks,
   assessPhishing,
+  linkDomains,
   linkDomainsAllMatch,
   linkMismatches,
   summarizeLinkDomains,
+  LINK_DOMAINS_MAX,
+  type LinkDomainsOptions,
   type LinkDomainSummary,
   type OffDomainLink,
   type PhishingAssessment,
@@ -113,6 +116,7 @@ export {
   type ContentSignalInput,
   type HtmlAnchor,
   type HtmlExtract,
+  type HtmlLink,
   type SpamPhraseGroup,
   type VocabularyHit,
 } from './content/index.js';

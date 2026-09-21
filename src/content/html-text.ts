@@ -34,6 +34,27 @@ export interface HtmlAnchor {
   quoted: boolean;
 }
 
+/**
+ * One place in the document a click can GO, whatever element offers it.
+ *
+ * Wider than {@link HtmlAnchor} on purpose, and answering a different
+ * question. An anchor is read for the pair a reader sees — the words and the
+ * destination — so the deceptive-link check needs exactly the elements that
+ * have visible words. "Where could this message send me" has no such limit:
+ * an image map's `<area>` is a click target with no text at all, and a
+ * `<form action>` is where a credential-harvesting page posts what the reader
+ * typed, which is the most consequential destination in a phishing mail and
+ * the one that is never an anchor.
+ */
+export interface HtmlLink {
+  /** The attribute verbatim, not resolved and not normalised. */
+  href: string;
+  /** True when it sits inside quoted history rather than the sender's own words. */
+  quoted: boolean;
+  /** The element that offered it. */
+  from: 'a' | 'area' | 'form';
+}
+
 export interface HtmlExtract {
   /** The sender's own visible words: quoted history and invisible text removed. */
   text: string;
@@ -47,7 +68,23 @@ export interface HtmlExtract {
   hiddenText: string;
   /** Every `<a href>` in the document, each flagged with whether it was quoted. */
   anchors: HtmlAnchor[];
+  /** Every navigable destination, in document order — see {@link HtmlLink}. */
+  links: HtmlLink[];
 }
+
+/**
+ * The attribute that makes each element a destination.
+ *
+ * Deliberately short. `<iframe src>`, `<img src>` and `<link href>` are
+ * fetched by the client, not navigated to by the reader, and counting them
+ * would put every tracking pixel's host into the answer — which on ordinary
+ * marketing mail is most of the hosts there are.
+ */
+const NAVIGABLE_ATTRIBUTE: ReadonlyMap<string, string> = new Map([
+  ['a', 'href'],
+  ['area', 'href'],
+  ['form', 'action'],
+]);
 
 /**
  * Tags whose CONTENT is not prose: code, styling and metadata the reader never
@@ -190,13 +227,14 @@ export function collapseWhitespace(text: string): string {
  * and no `catch` pretending there might be.
  */
 export function extractHtml(html: string | null | undefined): HtmlExtract {
-  const empty: HtmlExtract = { text: '', quotedText: '', hiddenText: '', anchors: [] };
+  const empty: HtmlExtract = { text: '', quotedText: '', hiddenText: '', anchors: [], links: [] };
   if (!html) return empty;
 
   const own: string[] = [];
   const quoted: string[] = [];
   const hidden: string[] = [];
   const anchors: HtmlAnchor[] = [];
+  const links: HtmlLink[] = [];
   const stack: Frame[] = [];
   const top = (): Frame | undefined => stack[stack.length - 1];
 
@@ -212,6 +250,14 @@ export function extractHtml(html: string | null | undefined): HtmlExtract {
         };
         const href = name === 'a' ? attribs['href'] : undefined;
         if (href !== undefined) frame.anchor = { href, parts: [] };
+        // Collected on OPEN, unlike anchors, which wait for their closing tag
+        // to have gathered their text: `links` is in document order, and a
+        // `<form>` that is never closed still names where it would post.
+        const navigable = NAVIGABLE_ATTRIBUTE.get(name);
+        const target = navigable === undefined ? undefined : attribs[navigable];
+        if (target !== undefined && target !== '') {
+          links.push({ href: target, quoted: frame.quoted, from: name as HtmlLink['from'] });
+        }
         stack.push(frame);
         if (BLOCK_TAGS.has(name)) (frame.quoted ? quoted : own).push('\n');
       },
@@ -247,5 +293,6 @@ export function extractHtml(html: string | null | undefined): HtmlExtract {
     quotedText: collapseWhitespace(quoted.join('')),
     hiddenText: collapseWhitespace(hidden.join('')),
     anchors,
+    links,
   };
 }
