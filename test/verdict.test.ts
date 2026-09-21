@@ -85,7 +85,7 @@ describe('parseSpamReasons', () => {
     expect(parseSpamReasons('42')).toEqual([]);
   });
 
-  // Regression: Sarv Inbox shipped these three ids before this package
+  // Regression: Sarv Inbox shipped these four ids before this package
   // existed and they are sitting in stored verdicts on users' disks. A
   // reader that switches on today's union must not fall through to a blank
   // row for mail that was scored last year.
@@ -93,12 +93,14 @@ describe('parseSpamReasons', () => {
     const stored = JSON.stringify([
       { id: 'ip-blocklisted', points: 4, detail: 'listed' },
       { id: 'domain-blocklisted', points: 2, detail: 'listed' },
+      { id: 'link-blocklisted', points: 5, detail: 'links to a listed domain' },
       { id: 'user-reported', points: 3, detail: 'reported' },
     ]);
 
     expect(parseSpamReasons(stored).map((parsed) => parsed.id)).toEqual([
       'reputation-ip-listed',
       'reputation-domain-listed',
+      'reputation-link-listed',
       'reputation-user-reported',
     ]);
   });
@@ -122,6 +124,7 @@ describe('canonicalReasonId', () => {
   it('translates every id this package has renamed', () => {
     expect(canonicalReasonId('ip-blocklisted')).toBe('reputation-ip-listed');
     expect(canonicalReasonId('domain-blocklisted')).toBe('reputation-domain-listed');
+    expect(canonicalReasonId('link-blocklisted')).toBe('reputation-link-listed');
     expect(canonicalReasonId('user-reported')).toBe('reputation-user-reported');
   });
 
@@ -192,6 +195,7 @@ describe('SPAM_REASON_STAGES', () => {
     expect(byStage('reputation')).toEqual([
       'reputation-domain-listed',
       'reputation-ip-listed',
+      'reputation-link-listed',
       'reputation-user-reported',
     ]);
   });
@@ -210,6 +214,7 @@ describe('stageOfReason', () => {
   // and the reputation sweep's own reasons would survive its next re-score.
   it('resolves a renamed id to its stage', () => {
     expect(stageOfReason('ip-blocklisted')).toBe('reputation');
+    expect(stageOfReason('link-blocklisted')).toBe('reputation');
     expect(stageOfReason('user-reported')).toBe('reputation');
   });
 

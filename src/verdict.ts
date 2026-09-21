@@ -74,6 +74,10 @@ export type SpamReasonId =
   // scanner as a finished assessment rather than as a rule.
   | 'reputation-ip-listed'
   | 'reputation-domain-listed'
+  // A domain the message LINKS to, rather than the one it was sent from.
+  // Same lists, different target: the sender can be a clean mailbox at a
+  // clean host and the payload still a link to a phishing site.
+  | 'reputation-link-listed'
   // The one signal in that stage that comes from neither the message nor a
   // blocklist: how many OTHER recipients have reported mail from this sender.
   // Only a host holding many mailboxes can count it, so nothing in this
@@ -83,9 +87,9 @@ export type SpamReasonId =
 /**
  * Reason ids this package has renamed, and what they are called now.
  *
- * Sarv Inbox shipped `ip-blocklisted`, `domain-blocklisted` and
- * `user-reported` before this package existed, and those strings are sitting
- * in stored verdicts on users' disks. Rows already written are not worth a
+ * Sarv Inbox shipped `ip-blocklisted`, `domain-blocklisted`,
+ * `link-blocklisted` and `user-reported` before this package existed, and
+ * those strings are sitting in stored verdicts on users' disks. Rows already written are not worth a
  * migration — a verdict is a cached opinion about mail that arrived months
  * ago — so the reader maps them on the way in and every consumer switches on
  * one set of ids. Adding to this table is how any future rename stays
@@ -94,6 +98,7 @@ export type SpamReasonId =
 const RENAMED_REASON_IDS: Readonly<Record<string, SpamReasonId>> = {
   'ip-blocklisted': 'reputation-ip-listed',
   'domain-blocklisted': 'reputation-domain-listed',
+  'link-blocklisted': 'reputation-link-listed',
   'user-reported': 'reputation-user-reported',
 };
 
@@ -163,6 +168,7 @@ export const SPAM_REASON_STAGES: Readonly<Record<SpamReasonId, SpamStage>> = {
   'attachment-encrypted-archive': 'attachment',
   'reputation-ip-listed': 'reputation',
   'reputation-domain-listed': 'reputation',
+  'reputation-link-listed': 'reputation',
   'reputation-user-reported': 'reputation',
 };
 

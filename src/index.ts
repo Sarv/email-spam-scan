@@ -76,6 +76,7 @@ export {
 export {
   anchorMismatches,
   linkTarget,
+  shownDomains,
   urlsInText,
   LINK_WRAPPER_DOMAINS,
   type AnchorLike,
@@ -87,6 +88,9 @@ export {
   assessPhishing,
   linkDomainsAllMatch,
   linkMismatches,
+  summarizeLinkDomains,
+  type LinkDomainSummary,
+  type OffDomainLink,
   type PhishingAssessment,
   type PhishingLevel,
 } from './links.js';

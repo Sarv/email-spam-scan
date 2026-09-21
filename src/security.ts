@@ -29,7 +29,14 @@
  */
 import type { BimiStatus } from './brand/bimi.js';
 import { assessSender, registrableDomain } from './identity.js';
-import { linkDomainsAllMatch, linkMismatches, type LinkMismatch } from './links.js';
+import {
+  linkDomainsAllMatch,
+  linkMismatches,
+  summarizeLinkDomains,
+  type LinkDomainSummary,
+  type LinkMismatch,
+  type OffDomainLink,
+} from './links.js';
 import {
   parseSpamReasons,
   spamVerdict,
@@ -165,6 +172,49 @@ const authCheck = (
   };
 };
 
+/**
+ * What the Links row says when nothing in the body was deceptive.
+ *
+ * Three different facts hide behind that one tick, and until they were spelt
+ * out here two of them produced the same sentence under two different badges:
+ * a message whose links all stay home is `verified`, one that links out to a
+ * document or a tracker is `authenticated`, and the reader saw "Link domains
+ * match what they show" in both places with no way to tell which fact had
+ * decided it. Naming the destinations turns the badge into something a person
+ * can check.
+ *
+ * The no-links case gets its own sentence rather than the reassuring one.
+ * Nothing was examined, and a check that says it passed when it never ran is
+ * the reason the other lines are worth reading.
+ */
+function linkPassDetail(
+  summary: LinkDomainSummary | null,
+  stray: readonly OffDomainLink[],
+  trustedCount: number,
+  senderDomain: string | null,
+): string {
+  if (summary && summary.linkCount === 0) return 'The sender wrote no links in this message';
+  const vetted = trustedCount
+    ? ` (${trustedCount} pair${trustedCount > 1 ? 's' : ''} you trust)`
+    : '';
+  const honest = `Link domains match what they show${vetted}`;
+  if (!summary || !senderDomain) return honest;
+  if (summary.offDomain.length === 0) return `${honest}, and every link stays on ${senderDomain}`;
+  // Links DID leave, and the level is the top one anyway, because the reader
+  // forgave each of them. Saying "every link stays on the domain" here would
+  // be the flattering lie this function exists to stop telling.
+  if (stray.length === 0) {
+    const forgiven = summary.offDomain.length;
+    const many = forgiven > 1;
+    return `${honest}; ${forgiven} link${many ? 's' : ''} leave${many ? '' : 's'} ${senderDomain}, and you have trusted ${many ? 'them' : 'it'}`;
+  }
+  const destinations = [...new Set(stray.map((link) => link.actual))];
+  const named = destinations.slice(0, 2).join(', ');
+  const more = destinations.length > 2 ? `, +${destinations.length - 2} more` : '';
+  const plural = stray.length > 1;
+  return `${honest}; ${stray.length} link${plural ? 's' : ''} leave${plural ? '' : 's'} ${senderDomain} (${named}${more})`;
+}
+
 export interface SecurityInput {
   fromName?: string | null;
   fromAddress?: string | null;
@@ -272,6 +322,17 @@ export function assessEmailSecurity(input: SecurityInput): SecurityAssessment {
   );
   const trustedCount = all.length - blockedLinks.length - untrustedLinks.length;
 
+  // Where the sender's own links GO — a different question from whether any of
+  // them lies about where it goes, and the one that separates `verified` from
+  // `authenticated` below. Both answers have to reach the reader: a checklist
+  // that reports only the deception test shows an identical row of ticks under
+  // two different badges, and the difference then looks like a bug in the
+  // shield rather than a fact about the mail.
+  const linkDomains = bodyLoaded ? summarizeLinkDomains(input.html, senderDomain) : null;
+  const isVetted = (link: OffDomainLink): boolean =>
+    link.shown.some((shown) => rules.trusted.has(key({ shown, actual: link.actual })));
+  const strayLinks = (linkDomains?.offDomain ?? []).filter((link) => !isVetted(link));
+
   if (!bodyLoaded) {
     checks.push({
       id: 'links',
@@ -302,9 +363,7 @@ export function assessEmailSecurity(input: SecurityInput): SecurityAssessment {
       id: 'links',
       label: 'Links',
       status: 'pass',
-      detail: trustedCount
-        ? `Link domains match what they show (${trustedCount} pair${trustedCount > 1 ? 's' : ''} you trust)`
-        : 'Link domains match what they show',
+      detail: linkPassDetail(linkDomains, strayLinks, trustedCount, senderDomain),
     });
   }
 
@@ -406,7 +465,7 @@ export function assessEmailSecurity(input: SecurityInput): SecurityAssessment {
     auth?.dmarc === 'pass' || (!dmarcKnown && auth?.spf === 'pass' && auth?.dkim === 'pass');
   if (authPassed) {
     // Fully authenticated AND every link the sender wrote stays on their own
-    // domain (or is a pair the user vetted): the top level. A newsletter that
+    // domain, or is a pair the user vetted: the top level. A newsletter that
     // passes DMARC but links out to its CDN and tracker is authenticated, not
     // verified — real, but not "everything in this mail is the sender".
     // `verified` is the claim that EVERYTHING in this mail is the sender's
@@ -414,8 +473,16 @@ export function assessEmailSecurity(input: SecurityInput): SecurityAssessment {
     // history is exempt: it is the mail being ANSWERED, not this one, and
     // holding its links against the replier denied `verified` to every
     // message after the first in a thread.
+    //
+    // The vetted pairs are honoured HERE and not only in the checks above.
+    // Trusting a pair used to lift the message out of `caution` and then leave
+    // it one rung short of the top for the very link that had just been
+    // forgiven — the rule appeared to work and then visibly did not, which
+    // reads as the setting being ignored.
     return result(
-      bodyLoaded && linkDomainsAllMatch(input.html, senderDomain) ? 'verified' : 'authenticated',
+      bodyLoaded && linkDomainsAllMatch(input.html, senderDomain, isVetted)
+        ? 'verified'
+        : 'authenticated',
     );
   }
   return result('unverified');

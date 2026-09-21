@@ -5,6 +5,7 @@ import {
   assessPhishing,
   linkDomainsAllMatch,
   linkMismatches,
+  summarizeLinkDomains,
   LINK_WRAPPER_DOMAINS,
 } from '../src/links.js';
 
@@ -143,6 +144,84 @@ describe('linkDomainsAllMatch', () => {
   // asserted — this feeds the top `verified` level.
   it('is false when the sender domain is unknown', () => {
     expect(linkDomainsAllMatch(anchor('x', 'https://example.net/a'), null)).toBe(false);
+  });
+});
+
+describe('summarizeLinkDomains', () => {
+  // Regression: the boolean above can decide a level but cannot explain it.
+  // Two messages with an identical row of green ticks showed different
+  // badges, and nothing a reader could see said why. This is the why.
+  it('counts the sender’s links and names the ones that leave', () => {
+    const html =
+      anchor('Home', 'https://example.net/h') +
+      anchor('The doc', 'https://docs.google.com/d/1') +
+      anchor('Status', 'https://status.io/s');
+    expect(summarizeLinkDomains(html, 'example.net')).toEqual({
+      linkCount: 3,
+      offDomain: [
+        { actual: 'google.com', shown: [] },
+        { actual: 'status.io', shown: [] },
+      ],
+    });
+  });
+
+  // Regression: zero links and "every link stayed home" both permit the top
+  // level, and reporting them with one sentence told a reader a check had
+  // passed that never ran.
+  it('separates a message with no links from one whose links all stay home', () => {
+    expect(summarizeLinkDomains('<p>Just text</p>', 'example.net')).toEqual({
+      linkCount: 0,
+      offDomain: [],
+    });
+    expect(summarizeLinkDomains(anchor('Home', 'https://example.net/h'), 'example.net')).toEqual({
+      linkCount: 1,
+      offDomain: [],
+    });
+  });
+
+  // Regression: a trust rule is keyed by the pair the reader SAW, so the
+  // shown domains have to travel with the link or the rule cannot be found.
+  it('carries the domains the text named, for the trust-rule key', () => {
+    const html = anchor('paypal.com', 'https://evil.ru/x');
+    expect(summarizeLinkDomains(html, 'example.net').offDomain).toEqual([
+      { actual: 'evil.ru', shown: ['paypal.com'] },
+    ]);
+  });
+
+  // Regression: same exemption as the boolean it backs — a reply's quoted
+  // history is the other party's mail, and counting it made every reply in a
+  // thread look like it linked away.
+  it('ignores quoted history and non-web schemes', () => {
+    const html = `${anchor('Mail us', 'mailto:a@example.net')}<blockquote>${anchor('Portal', 'https://other.example/x')}</blockquote>`;
+    expect(summarizeLinkDomains(html, 'example.net')).toEqual({ linkCount: 0, offDomain: [] });
+  });
+
+  // Regression: an href with no registrable domain (a bare IP) has nowhere to
+  // put its name, and dropping it would let the one link most worth reporting
+  // report nothing.
+  it('falls back to the host for a link with no registrable domain', () => {
+    expect(
+      summarizeLinkDomains(anchor('Pay', 'https://203.0.113.9/p'), 'example.net').offDomain,
+    ).toEqual([{ actual: '203.0.113.9', shown: [] }]);
+  });
+});
+
+describe('linkDomainsAllMatch — vetted pairs', () => {
+  const html = anchor('paypal.com', 'https://evil.ru/x');
+
+  // Regression: the doc comment promised vetted pairs were forgiven here and
+  // the code had no way to ask. A reader who trusted the pair watched the
+  // message climb out of caution and stop one rung short for the very link
+  // they had just forgiven.
+  it('forgives a link the caller vouches for', () => {
+    expect(linkDomainsAllMatch(html, 'example.net', (link) => link.actual === 'evil.ru')).toBe(
+      true,
+    );
+  });
+
+  it('still fails when the predicate declines, or when there is none', () => {
+    expect(linkDomainsAllMatch(html, 'example.net', () => false)).toBe(false);
+    expect(linkDomainsAllMatch(html, 'example.net')).toBe(false);
   });
 });
 

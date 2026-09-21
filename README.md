@@ -907,7 +907,10 @@ are, but not nothing.
 
 - `linkMismatches(html): LinkMismatch[]` — `{ shown, actual }`, de-duplicated, capped at three
 - `assessLinks(html): PhishingReason[]` — the same, phrased for a human
-- `linkDomainsAllMatch(html, senderDomain): boolean`
+- `linkDomainsAllMatch(html, senderDomain, isVetted?): boolean` — pass `isVetted` to forgive
+  a link the reader has already trusted
+- `summarizeLinkDomains(html, senderDomain): LinkDomainSummary` — the counted form:
+  `linkCount` and the `offDomain` links, so a UI can SAY why a message was not verified
 - `assessPhishing({ fromName, fromAddress, html }): PhishingAssessment`
 - `LINK_WRAPPER_DOMAINS: Set<string>`
 

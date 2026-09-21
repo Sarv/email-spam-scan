@@ -9,6 +9,13 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
+- **`summarizeLinkDomains(html, senderDomain)`** (`/links`) — the counted form
+  of `linkDomainsAllMatch`: how many links the sender wrote, and which ones
+  leave their domain, each carrying the domains its text named. A boolean can
+  decide a level but cannot explain it, and a UI that shows the same row of
+  ticks under two different badges teaches a reader that the badge is
+  arbitrary. `shownDomains(anchor, actual)` is exported from `/links` too, the
+  one selection both the deception check and the trust-rule key are built on.
 - **`stageOfReason` / `SPAM_REASON_STAGES`** (`/verdict`, no dependencies) —
   which stage produced a stored reason: `header`, `content`, `attachment` or
   `reputation`. For a consumer that scores a message in pieces, which every
@@ -326,6 +333,24 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Changed
 
+- **`assessEmailSecurity`'s Links row now names the fact that decided the
+  level.** It reported only the deception test — "Link domains match what they
+  show" — while `verified` vs `authenticated` turns on a different question:
+  whether every link stays on the sender's own domain. Two messages could show
+  seven identical green ticks under two different badges with nothing on
+  screen to tell them apart. The row now reads
+  `…; 2 links leave example.net (docs.google.com, status.io)` when links go
+  out, `…, and every link stays on example.net` when they do not, and
+  `The sender wrote no links in this message` when there were none: an absence
+  is no longer reported as a check that ran and passed.
+- **BREAKING (behavioural): `linkDomainsAllMatch` takes an optional `isVetted`
+  predicate, and `assessEmailSecurity` passes one.** A link pair the user has
+  trusted now also stops blocking `verified`. Its doc comment had promised this
+  for two releases while the function had no way to ask — so trusting a pair
+  lifted a message out of `caution` and then withheld the top level for the
+  very link that had just been forgiven, which reads as the setting being
+  ignored. Messages with a trusted off-domain pair will move from
+  `authenticated` to `verified`.
 - **`ownWords` recognises more of the quoted history**, having taken in the
   markers the other implementation carried: an attribution `html-to-text` has
   collapsed into the middle of a line (the shape most HTML mail arrives in),

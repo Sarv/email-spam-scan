@@ -171,15 +171,89 @@ describe('assessEmailSecurity — the level', () => {
   });
 });
 
+describe('assessEmailSecurity — the Links row explains the badge', () => {
+  const detailOf = (over: Parameters<typeof assessEmailSecurity>[0] = {}): string =>
+    assessEmailSecurity({ ...SENDER, auth: auth(), ...over }).checks.find((c) => c.id === 'links')
+      ?.detail ?? '';
+
+  // THE regression this row exists for. Two messages, seven identical green
+  // ticks, two different badges: one `verified`, one `authenticated`, and
+  // nothing on screen said which fact had decided it. The level's question
+  // (does every link stay home?) is not the Links check's question (does any
+  // link lie about where it goes?), so the deciding fact has to be stated.
+  it('says which links left the domain, so two identical tick lists read differently', () => {
+    const home = { html: anchor('Our docs', 'https://example.net/docs') };
+    const away = { html: anchor('The doc', 'https://docs.google.com/d/1') };
+
+    expect(levelOf({ auth: auth(), ...home })).toBe('verified');
+    expect(levelOf({ auth: auth(), ...away })).toBe('authenticated');
+
+    // Both still pass the deception check — that is the whole trap.
+    expect(
+      assessEmailSecurity({ ...SENDER, auth: auth(), ...away }).checks.find((c) => c.id === 'links')
+        ?.status,
+    ).toBe('pass');
+
+    expect(detailOf(home)).toBe(
+      'Link domains match what they show, and every link stays on example.net',
+    );
+    expect(detailOf(away)).toBe(
+      'Link domains match what they show; 1 link leaves example.net (google.com)',
+    );
+  });
+
+  // Regression: a body with nothing to check was reported as a body that had
+  // been checked and found clean — the flattering reading of an absence, on
+  // the one row a reader consults to find out what was actually examined.
+  it('does not claim a link check it never ran on a message with no links', () => {
+    expect(detailOf({ html: '<p>Just a note.</p>' })).toBe(
+      'The sender wrote no links in this message',
+    );
+    expect(levelOf({ auth: auth(), html: '<p>Just a note.</p>' })).toBe('verified');
+  });
+
+  it('counts and names several destinations, and caps the naming', () => {
+    const html =
+      anchor('a', 'https://one.example/a') +
+      anchor('b', 'https://two.example/b') +
+      anchor('c', 'https://three.example/c');
+    expect(detailOf({ html })).toBe(
+      'Link domains match what they show; 3 links leave example.net (one.example, two.example, +1 more)',
+    );
+  });
+
+  // Regression: the body is not here yet, and the row must say so rather than
+  // borrow either of the sentences above.
+  it('reports the links as unchecked while the body is still being fetched', () => {
+    expect(detailOf({ html: null, bodyLoaded: false })).toContain('has not been downloaded yet');
+  });
+});
+
 describe('assessEmailSecurity — trust and block rules', () => {
   const html = anchor('paypal.com', 'https://evil.ru/x');
   const key = linkRuleKey('example.net', 'paypal.com', 'evil.ru');
 
-  it('a trusted pair stops being a caution', () => {
+  // CHANGED in 0.4: this used to stop at `authenticated`. Trusting the pair
+  // lifted the message out of `caution` and then withheld the top level for
+  // the very link that had just been forgiven — the setting appeared to work
+  // and then visibly did not. Regression: the vetted pair is honoured in the
+  // level as well as in the checks.
+  it('a trusted pair stops being a caution, and is forgiven by the level too', () => {
     const result = assessEmailSecurity({ ...SENDER, auth: auth(), html, rules: rules([key]) });
     expect(result.untrustedLinks).toEqual([]);
-    expect(result.level).toBe('authenticated');
+    expect(result.level).toBe('verified');
     expect(result.checks.find((c) => c.id === 'links')?.detail).toContain('1 pair you trust');
+  });
+
+  // Regression: the detail claimed "every link stays on example.net" for a
+  // link that plainly went to evil.ru and had merely been forgiven. The whole
+  // point of these lines is that a reader can check them.
+  it('says the trusted link LEFT the domain rather than that it stayed', () => {
+    const result = assessEmailSecurity({ ...SENDER, auth: auth(), html, rules: rules([key]) });
+    const detail = result.checks.find((c) => c.id === 'links')?.detail ?? '';
+    expect(detail).toContain('1 link leaves example.net');
+    expect(detail).toContain('you have trusted it');
+    expect(detail).not.toContain('every link stays');
   });
 
   it('a blocked pair forces danger', () => {

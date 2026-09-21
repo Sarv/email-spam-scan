@@ -139,6 +139,25 @@ export interface AnchorLike {
 }
 
 /**
+ * The domains an anchor's visible text names that are NOT where it goes.
+ *
+ * Shared by the two questions that both need it and must agree: which anchors
+ * are deceptive ({@link anchorMismatches}), and — for an anchor that leaves the
+ * sender's domain — which trust rule the user would have written about it. A
+ * rule is keyed by the pair the reader saw, so a second copy of this selection
+ * that chose a different name would look up a key nobody ever stored.
+ *
+ * A link wrapper is neither end of a lie: mail that goes out through one shows
+ * its own brand and arrives via the wrapper's domain, which is the arrangement
+ * working, not a trick.
+ */
+export function shownDomains(anchor: AnchorLike, actual: string): string[] {
+  return domainsInText(anchor.text).filter(
+    (shown) => shown !== actual && !LINK_WRAPPER_DOMAINS.has(shown),
+  );
+}
+
+/**
  * Anchors whose visible text names one registrable domain while the href goes
  * to another.
  *
@@ -153,8 +172,7 @@ export function anchorMismatches(anchors: readonly AnchorLike[]): LinkMismatch[]
     const target = linkTarget(anchor.href);
     const actual = target?.domain;
     if (!actual || LINK_WRAPPER_DOMAINS.has(actual)) continue;
-    for (const shown of domainsInText(anchor.text)) {
-      if (shown === actual || LINK_WRAPPER_DOMAINS.has(shown)) continue;
+    for (const shown of shownDomains(anchor, actual)) {
       const key = `${shown}->${actual}`;
       if (seen.has(key)) continue;
       seen.add(key);
