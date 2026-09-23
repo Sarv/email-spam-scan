@@ -7,6 +7,64 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.3.0] - 2026-09-23
+
+### Added
+
+- **`brand-impersonation`** (header stage, 3 points) — the display name
+  borrows a protected brand's name on an address outside that brand's own
+  domains. `"Adobe Acrobat Sign" <Adobesign@powersublinks.com>` passed SPF,
+  DKIM and DMARC — for powersublinks.com, which the attacker owns — and the
+  existing display-name rule needed a DOMAIN in the name to have anything to
+  compare, so a name with no dot in it sailed through under a green shield.
+  Authentication says who sent a message, never whether they are who the name
+  says; the one offline check left is knowing which domains a brand actually
+  writes from. `src/data/brands.ts` holds that list — thirty-nine brands, each
+  with the names it is impersonated with and the registrable domains it sends
+  from, with the bar for an entry in the file header — and `brandsNamedIn`,
+  `brandOwningDomain` and `impersonatedBrand` (`/identity`) read it.
+  `assessSender` reports the match as `danger`, so the shield paints it red
+  exactly as it does the embedded-domain spoof; the two are exclusive, because
+  one display name is one lie. List mail is exempt: a list that rewrites From
+  for DMARC puts the author's name on its own address, so the scorer drops the
+  reason under a `List-Id` and every reader treats ` via ` in a name the same
+  way. So is any sender domain that carries the brand's own name
+  (`domainCarriesBrandName`): a brand's real sending domains outnumber any
+  list — Axis Bank writes from `alerts.axisbankmail.bank.in` — and red on a
+  bank statement is the false positive this package exists to avoid. The
+  price, stated in the tests as a known limitation, is that a lookalike
+  domain (`paypal-secure.example`) is not this rule's business; it is a
+  different tell and needs a rule of its own.
+- **`in-reply-to-self`** (header stage, 2 points) — `In-Reply-To` names the
+  message's own `Message-ID`. No mail client produces a reply to itself; a
+  phishing kit does, so that a threading view shows a conversation already
+  under way. The campaign above did exactly this, and with the brand name it
+  is 3 + 2 on the headers alone.
+- **`ContentSignalInput.recipientDomains`** — who the message was addressed
+  to, so `link-display-mismatch` can tell a link dressed as the READER'S OWN
+  organisation ("Sarv.com Engagement Letter" pointing at kuaiyudh.top, 4
+  points) from one borrowing a protected brand's domain (3) and from anyone
+  else's (2). `scan` fills it from To and Cc; a client passes the mailbox
+  owner's domain as well. The heaviest tier still sits below `SPAM_THRESHOLD`:
+  a vendor newsletter wrapping a link to the reader's own site through a
+  tracking host not on the wrapper list must not be filed on that alone.
+- **`PhishingReason.kind`** — `domain`, `brand`, `punycode` or `link`, so a
+  scorer can give each check its own reason id while a shield keeps reading
+  `severity` alone.
+- **`PROTECTED_BRANDS`** and the three helpers above are exported from
+  `/identity` and the main entry. `normalizeForMatching` and `containsPhrase`
+  moved to `src/text.ts`, which has no dependencies, so the identity entry and
+  the vocabulary stage fold text the same way; both are still exported from
+  `/content` under their old names, and `/identity` still costs `tldts` alone.
+
+### Changed
+
+- **Weights.** `link-display-mismatch` is 2, 3 or 4 by whose name the text
+  borrowed (above); every other rule is unchanged. The content stage's
+  guarantee is now "no single rule reaches `SPAM_THRESHOLD` alone" rather than
+  "no single rule exceeds 2" — the 4-point tier is the one exception, and it
+  is argued in `src/content/rules.ts`.
+
 ## [0.2.0] - 2026-09-21
 
 ### Added
