@@ -68,10 +68,16 @@ export { FREEMAIL_DOMAINS } from './data/freemail-domains.js';
 export { hasReplyPrefix, isValidMessageId } from './rfc.js';
 export {
   assessSender,
+  brandOwningDomain,
+  brandsNamedIn,
+  domainCarriesBrandName,
   domainOfAddress,
   domainsInText,
+  impersonatedBrand,
   registrableDomain,
+  PROTECTED_BRANDS,
   type PhishingReason,
+  type ProtectedBrand,
 } from './identity.js';
 export {
   anchorMismatches,

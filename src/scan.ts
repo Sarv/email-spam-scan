@@ -36,6 +36,7 @@ import { extractAuthHeaderBlock, parseAuthenticationHeaders } from './headers/au
 import { headerLookupFromText, headerValuesFromText } from './headers/lookup.js';
 import { extractOriginIp } from './headers/origin-ip.js';
 import { receivedAt } from './headers/received-date.js';
+import { domainOfAddress } from './identity.js';
 import { assessSpamSignals } from './rules/header-rules.js';
 import {
   mergeAssessments,
@@ -291,6 +292,11 @@ export function scanParsed(email: Email, options: ScanOptions = {}): ScanResult 
     subject: message.subject,
     text: email.text ?? null,
     html: email.html ?? null,
+    // Whose name a deceptive link may borrow to look like the reader's own
+    // site: everyone the message was addressed to.
+    recipientDomains: [...mailboxes(email.to), ...mailboxes(email.cc)].map((mailbox) =>
+      domainOfAddress(mailbox.address),
+    ),
   });
 
   // The bytes as the parser decoded them, so the magic-number and zip-directory

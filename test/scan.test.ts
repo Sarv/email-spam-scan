@@ -13,6 +13,7 @@ import {
   SIGNING_DOMAIN,
   SIGNING_SUPPORTED,
 } from './dkim-fixture.js';
+import { ADOBE_SIGN_LURE } from './phish-fixture.js';
 
 /** A raw RFC 5322 message. Headers as given, then a blank line, then the body. */
 function message(headers: string[], body = 'Hello, the invoice is attached.\r\n'): string {
@@ -86,6 +87,45 @@ describe('scan', () => {
     expect(ids).toContain('link-display-mismatch');
     expect(result.isSpam).toBe(true);
     expect(result.verdict).toBe('spam');
+  });
+
+  // The campaign these rules were written for, end to end: a brand name on an
+  // attacker-owned domain that passed every authentication check, forged
+  // threading, and a link dressed as the recipient's own domain. Headers alone
+  // are 3 + 2; with the body it is well over the line — and `auth-failed` is
+  // NOT among the reasons, because nothing about the authentication was wrong.
+  it('files the authenticated brand-impersonation lure as spam', async () => {
+    const result = await scan(ADOBE_SIGN_LURE);
+    const ids = result.reasons.map((reason) => reason.id);
+    expect(ids).toContain('brand-impersonation');
+    expect(ids).toContain('in-reply-to-self');
+    expect(ids).toContain('link-display-mismatch');
+    expect(result.reasons.find((r) => r.id === 'link-display-mismatch')?.points).toBe(4);
+    expect(ids).not.toContain('auth-failed');
+    expect(result.auth?.dmarc).toBe('pass');
+    expect(result.isSpam).toBe(true);
+    expect(result.verdict).toBe('spam');
+  });
+
+  // Regression: the recipient domains come from To AND Cc — a lure sent to a
+  // list of colleagues with the reader on Cc still names the reader's domain.
+  it('reads the recipient domains from both To and Cc', async () => {
+    const lure = (to: string, cc: string): string =>
+      message(
+        [
+          RECEIVED,
+          'From: docs@sender.example',
+          `To: ${to}`,
+          `Cc: ${cc}`,
+          'Subject: Document',
+          'Content-Type: text/html; charset=utf-8',
+        ],
+        '<a href="https://evil.example/x">reader.example portal</a>\r\n',
+      );
+    const viaCc = await scan(lure('someone@other.example', 'me@reader.example'));
+    expect(viaCc.reasons.find((r) => r.id === 'link-display-mismatch')?.points).toBe(4);
+    const unrelated = await scan(lure('someone@other.example', 'x@third.example'));
+    expect(unrelated.reasons.find((r) => r.id === 'link-display-mismatch')?.points).toBe(2);
   });
 
   // Regression: header reasons must come first, because that is the order the

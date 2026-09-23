@@ -158,10 +158,12 @@ describe('SPAM_REASON_STAGES', () => {
 
     expect(byStage('header')).toEqual([
       'auth-failed',
+      'brand-impersonation',
       'bulk-no-unsubscribe',
       'date-skew',
       'display-name-spoof',
       'fake-reply',
+      'in-reply-to-self',
       'known-spammer',
       'malformed-message-id',
       'missing-date',

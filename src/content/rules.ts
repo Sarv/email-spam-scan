@@ -23,8 +23,11 @@
  * of them at once is not a stronger opinion, it is several separate deceptions,
  * and a message carrying all of them is spam whatever its headers said.
  *
- * No single rule anywhere in the file is worth more than 2 points, so none of
- * them is a veto on its own.
+ * No single rule anywhere in the file can reach `SPAM_THRESHOLD` on its own,
+ * so none of them is a veto. The heaviest is the deceptive link whose text
+ * names the READER'S OWN domain — 4 points — because a link dressed as the
+ * reader's organisation that goes somewhere else has no honest version;
+ * everything else is worth 2 or less.
  *
  * WHAT IT SCORES. The sender's own words: quoted history, signature and the
  * client's footer removed first (`quote.ts` for plain text, the blockquote and
@@ -36,6 +39,7 @@
  * answer is a pure function of the bytes handed in, which is what makes a
  * score reproducible months later when somebody asks why their mail was filed.
  */
+import { brandOwningDomain, registrableDomain } from '../identity.js';
 import {
   anchorMismatches,
   linkTarget,
@@ -61,6 +65,15 @@ export interface ContentSignalInput {
   text?: string | null;
   /** The `text/html` body, as received. */
   html?: string | null;
+  /**
+   * Domains the READER belongs to: the To and Cc addresses, and the mailbox
+   * owner's own. A deceptive link whose visible text names one of these is
+   * dressed as the reader's own organisation — "Sarv.com Engagement Letter"
+   * pointing at kuaiyudh.top — which is worth twice what an anonymous
+   * mismatch is. Hosts or addresses are accepted; each is reduced to its
+   * registrable domain, and anything unresolvable is ignored.
+   */
+  recipientDomains?: readonly (string | null | undefined)[];
 }
 
 /**
@@ -190,9 +203,41 @@ export function assessContentSignals(input: ContentSignalInput): SpamAssessment 
     );
   }
 
-  // 4. Links. Structural facts about where a link goes, never a judgement
-  //    about whose domain it is.
+  // 4. Links. Structural facts about where a link goes. Three weights for
+  //    the one deception, by whose name the text borrowed: the reader's own
+  //    domain (4 — "Sarv.com Engagement Letter" going to kuaiyudh.top has no
+  //    honest version), a protected brand's (3 — the same lie the sender
+  //    rule charges 3 for, told in the body instead), and anyone else's (2).
+  //    Even the heaviest stays below `SPAM_THRESHOLD`: a vendor's newsletter
+  //    that wraps a link to the reader's own site through a tracking host
+  //    not on the wrapper list must not be filed on that alone.
+  const readers = new Set(
+    (input.recipientDomains ?? [])
+      .map((domain) =>
+        registrableDomain(
+          domain?.includes('@') ? domain.slice(domain.lastIndexOf('@') + 1) : domain,
+        ),
+      )
+      .filter((domain): domain is string => domain !== null),
+  );
   for (const { shown, actual } of anchorMismatches(content.anchors)) {
+    if (readers.has(shown)) {
+      add(
+        'link-display-mismatch',
+        4,
+        `A link dressed as your own domain ${shown} actually points to ${actual}`,
+      );
+      continue;
+    }
+    const brand = brandOwningDomain(shown);
+    if (brand) {
+      add(
+        'link-display-mismatch',
+        3,
+        `A link that appears to go to ${brand.name} (${shown}) actually points to ${actual}`,
+      );
+      continue;
+    }
     add(
       'link-display-mismatch',
       2,

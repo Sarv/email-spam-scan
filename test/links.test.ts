@@ -72,6 +72,7 @@ describe('assessLinks', () => {
   it('phrases each mismatch as a caution', () => {
     const reasons = assessLinks(anchor('paypal.com', 'https://evil.ru/x'));
     expect(reasons).toHaveLength(1);
+    expect(reasons[0]!.kind).toBe('link');
     expect(reasons[0]!.severity).toBe('caution');
     expect(reasons[0]!.text).toContain('paypal.com');
     expect(reasons[0]!.text).toContain('evil.ru');
@@ -256,6 +257,20 @@ describe('assessPhishing', () => {
     });
     expect(result.level).toBe('danger');
     expect(result.reasons.length).toBeGreaterThan(1);
+  });
+});
+
+describe('assessPhishing — a borrowed brand name', () => {
+  // Regression: the renderer's banner reads this, and it must go red on a
+  // name with no domain in it — the case the domain rule cannot see.
+  it('is danger when the sender name borrows a protected brand, with no domain in it', () => {
+    const result = assessPhishing({
+      fromName: 'DocuSign',
+      fromAddress: 'docs@evil.ru',
+      html: null,
+    });
+    expect(result.level).toBe('danger');
+    expect(result.reasons[0]?.kind).toBe('brand');
   });
 });
 

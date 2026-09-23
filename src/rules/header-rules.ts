@@ -149,10 +149,27 @@ export function assessSpamSignals(input: SpamSignalInput): SpamAssessment {
     }
   }
 
-  // 4. Identity.
+  // 4. Identity. Three checks, three ids, one call: the shield and the
+  //    scorer read the same `assessSender`, so a name the shield paints red is
+  //    always a name the filter charged for. A brand name borrowed by a
+  //    mailing list or a group is NOT impersonation — a list that rewrites
+  //    From for DMARC puts the author's name on its own address, and every
+  //    brand that posts to a Google Group would otherwise score here — so the
+  //    brand reason is dropped when the message declares itself list mail.
+  //    The domain check keeps firing on a list: a list does not put another
+  //    domain into the author's name.
+  const listMail = !!input.headers && !!bulkHeaderSignals(input.headers).listId;
   for (const reason of assessSender(input.fromName, input.fromAddress)) {
-    if (reason.severity === 'danger') add('display-name-spoof', 3, reason.text);
-    else add('sender-punycode', 1, reason.text);
+    switch (reason.kind) {
+      case 'domain':
+        add('display-name-spoof', 3, reason.text);
+        break;
+      case 'brand':
+        if (!listMail) add('brand-impersonation', 3, reason.text);
+        break;
+      default:
+        add('sender-punycode', 1, reason.text);
+    }
   }
   const from = (input.fromAddress || '').trim();
   if (!from) add('sender-invalid', 2, 'No sender address');
@@ -215,6 +232,21 @@ export function assessSpamSignals(input: SpamSignalInput): SpamAssessment {
       'fake-reply',
       2,
       'Looks like a reply, but it is not replying to anything (no In-Reply-To or References)',
+    );
+  }
+
+  // A reply to ITSELF. In-Reply-To is supposed to name the message being
+  // answered; naming this message's own Message-ID is something no mail
+  // client does, and something a phishing kit does to make a threading view
+  // show a conversation already under way. Two points — categorical about
+  // the headers being forged, but the forgery alone does not say the message
+  // is unwanted.
+  const inReplyTo = (input.inReplyTo || '').trim();
+  if (messageId && inReplyTo && inReplyTo === messageId) {
+    add(
+      'in-reply-to-self',
+      2,
+      'Claims to be a reply to itself — In-Reply-To names this message’s own Message-ID',
     );
   }
 

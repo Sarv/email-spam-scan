@@ -21,10 +21,36 @@
  * Domain comparison is done on the registrable domain (eTLD+1), so
  * `mail.paypal.com` vs `paypal.com` is NOT flagged, while `paypal.com` vs
  * `paypal.secure-login.ru` is.
+ *
+ * TWO WAYS TO WEAR A NAME. The first version of this rule caught a display
+ * name that contained a DOMAIN — `"PayPal <service@paypal.com>"` — because
+ * `tldts` can adjudicate a domain and no list is needed. It could not catch
+ * `"Adobe Acrobat Sign" <Adobesign@powersublinks.com>`: no dot in the name,
+ * so nothing to resolve, and the message passed SPF, DKIM and DMARC for the
+ * attacker's own domain. Authentication says who sent a message; it cannot
+ * say whether that sender is who the name claims. The second check closes
+ * that: a curated list of protected brands and the domains each actually
+ * sends from (`./data/brands.ts`), so a name borrowed from the list on an
+ * address outside its domains is the same lie as the embedded domain — and
+ * is reported with the same severity.
  */
-import { getDomain } from 'tldts';
+import { getDomain, parse as parseHost } from 'tldts';
+
+import { PROTECTED_BRANDS, type ProtectedBrand } from './data/brands.js';
+import { containsPhrase, normalizeForMatching } from './text.js';
+
+export type { ProtectedBrand };
+export { PROTECTED_BRANDS };
 
 export interface PhishingReason {
+  /**
+   * Which check spoke. `domain`: the display name names another registrable
+   * domain. `brand`: it borrows a protected brand's name on an address that is
+   * not the brand's. `punycode`: the sender domain is IDN-encoded. `link`: an
+   * anchor's text and href disagree (from `/links`). A scorer maps each to
+   * its own reason id; a shield needs only `severity`.
+   */
+  kind: 'domain' | 'brand' | 'punycode' | 'link';
   /** 'danger' is a categorical tell; 'caution' is suggestive on its own. */
   severity: 'danger' | 'caution';
   text: string;
@@ -76,13 +102,122 @@ export function domainsInText(text: string | null | undefined): string[] {
 }
 
 /**
+ * The protected brand whose own domains include this host, or null.
+ *
+ * Compared at eTLD+1, so `documents.adobe.com` is Adobe's and
+ * `adobe.com.evil.example` is not — the registrable domain of the latter is
+ * `evil.example`, whatever the labels in front of it say.
+ */
+export function brandOwningDomain(host: string | null | undefined): ProtectedBrand | null {
+  const domain = registrableDomain(host);
+  if (!domain) return null;
+  return PROTECTED_BRANDS.find((brand) => brand.domains.includes(domain)) ?? null;
+}
+
+/**
+ * Every protected brand whose name appears in some text, as whole words, in
+ * the order the list holds them.
+ *
+ * Matching is the same fold the vocabulary stage uses (`./text.ts`): case,
+ * NFKC lookalikes and zero-width separators are all collapsed first, so
+ * `ＰａｙＰａｌ` and `Pay<U+200B>Pal` both match and `paypalooza` does not.
+ */
+export function brandsNamedIn(text: string | null | undefined): ProtectedBrand[] {
+  const haystack = normalizeForMatching(text);
+  if (!haystack) return [];
+  return PROTECTED_BRANDS.filter((brand) =>
+    brand.phrases.some((phrase) => containsPhrase(haystack, phrase)),
+  );
+}
+
+/**
+ * The shortest label that still names a brand. `fb.com` and `me.com` give
+ * two-letter labels that appear inside ordinary words, and an exemption keyed
+ * on those would forgive `theme.example` for Apple.
+ */
+const BRAND_LABEL_MIN_CHARS = 3;
+
+/**
+ * True when the sender's registrable domain carries the brand's own name —
+ * `axisbankmail.bank.in` for Axis Bank, `wellsfargoemail.com` for Wells Fargo.
+ *
+ * WHY THIS EXEMPTION EXISTS. A brand's real sending domains are more numerous
+ * than any list: Axis Bank writes from `alerts.axisbankmail.bank.in`, and the
+ * first consumer of this package had a live-mailbox test proving it. A rule
+ * that painted that statement red would be the false positive this package is
+ * built to avoid — red on a bank statement teaches the reader to ignore red.
+ * So a domain that visibly names the brand is left alone here, whatever the
+ * list says.
+ *
+ * WHAT IT COSTS, stated plainly: the LOOKALIKE domain — `paypal-secure.example`
+ * writing as "PayPal" — carries the brand's name too, and is therefore NOT this
+ * rule's business. That is a different tell (a registrable domain built around
+ * a brand's name that the brand does not own) and needs a rule of its own;
+ * what this rule catches is the name on a stranger's domain — the freemail
+ * address, the throwaway `powersublinks.com` — which is where the campaign
+ * that motivated it came from.
+ *
+ * The labels are taken from the brand's own domains (`axisbank` from
+ * `axisbank.com`), not from its phrases, so a brand named by a phrase like
+ * "state bank of india" is matched on the label it actually registers.
+ */
+export function domainCarriesBrandName(
+  brand: ProtectedBrand,
+  senderDomain: string | null | undefined,
+): boolean {
+  const label = parseHost((senderDomain ?? '').toLowerCase()).domainWithoutSuffix;
+  if (!label) return false;
+  return brand.domains.some((domain) => {
+    const own = parseHost(domain).domainWithoutSuffix;
+    return !!own && own.length >= BRAND_LABEL_MIN_CHARS && label.includes(own);
+  });
+}
+
+/**
+ * A mailing list or a group that rewrites From for DMARC's sake writes the
+ * original author's name followed by ` via ` and its own — `"Alex Carter via
+ * Sales Team" <sales@groups.example>`. The name in front of ` via ` is a
+ * claim about the AUTHOR, made by the list, and the address is the list's;
+ * judging that pair as impersonation would flag every brand that posts to a
+ * Google Group. The header scorer additionally exempts anything carrying a
+ * `List-Id`, which this entry, having no headers, cannot see.
+ */
+const LIST_REWRITE_MARKER = ' via ';
+
+/**
+ * The protected brand a display name borrows on an address that is not the
+ * brand's own, or null when the name borrows nothing — or when it is the
+ * brand itself writing.
+ */
+export function impersonatedBrand(
+  fromName: string | null | undefined,
+  senderDomain: string | null | undefined,
+): ProtectedBrand | null {
+  const name = normalizeForMatching(fromName);
+  if (!name || name.includes(LIST_REWRITE_MARKER)) return null;
+  // The brand writing under its own name is the arrangement working.
+  if (brandOwningDomain(senderDomain)) return null;
+  const brand = brandsNamedIn(name)[0];
+  if (!brand) return null;
+  // ...and so is the brand writing from a domain the list has not heard of
+  // but that carries its name. See {@link domainCarriesBrandName}.
+  return domainCarriesBrandName(brand, senderDomain) ? null : brand;
+}
+
+/**
  * Assess the sender identity from the always-available From name + address.
  *
  * DANGER when the display name references a different registrable domain than
- * the one the mail was sent from (the classic display-name spoof); CAUTION
- * when the sender domain is punycode/IDN, which can be a homograph of a real
- * brand and can equally be somebody's perfectly ordinary non-Latin domain —
- * which is why it is a caution and not a verdict.
+ * the one the mail was sent from (the classic display-name spoof), or borrows
+ * a protected brand's name on an address outside that brand's domains;
+ * CAUTION when the sender domain is punycode/IDN, which can be a homograph of
+ * a real brand and can equally be somebody's perfectly ordinary non-Latin
+ * domain — which is why it is a caution and not a verdict.
+ *
+ * The two DANGER checks are exclusive: a name like `"PayPal <service@paypal.com>"`
+ * on evil.ru names PayPal's domain AND PayPal's brand, and it is one lie. The
+ * domain check speaks, because it is the more specific claim, and the brand
+ * check is only consulted when no domain was named.
  */
 export function assessSender(
   fromName: string | null | undefined,
@@ -95,13 +230,25 @@ export function assessSender(
   const nameDomains = domainsInText(fromName).filter((domain) => domain !== senderDomain);
   if (nameDomains.length > 0) {
     reasons.push({
+      kind: 'domain',
       severity: 'danger',
       text: `The sender name mentions ${nameDomains.join(', ')}, but this email was actually sent from ${senderDomain}.`,
     });
+  } else {
+    const shown = fromName?.trim();
+    const brand = shown ? impersonatedBrand(shown, senderDomain) : null;
+    if (brand) {
+      reasons.push({
+        kind: 'brand',
+        severity: 'danger',
+        text: `The sender name "${shown}" borrows the ${brand.name} name, but this email was actually sent from ${senderDomain}, which does not belong to ${brand.name}.`,
+      });
+    }
   }
 
   if (senderDomain.includes('xn--')) {
     reasons.push({
+      kind: 'punycode',
       severity: 'caution',
       text: `The sender domain "${senderDomain}" uses punycode, which can be used to imitate a well-known brand.`,
     });

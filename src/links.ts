@@ -54,6 +54,7 @@ export function linkMismatches(html: string | null | undefined): LinkMismatch[] 
 /** {@link linkMismatches}, phrased for a human. */
 export function assessLinks(html: string | null | undefined): PhishingReason[] {
   return linkMismatches(html).map(({ shown, actual }) => ({
+    kind: 'link' as const,
     severity: 'caution' as const,
     text: `A link that appears to go to ${shown} actually points to ${actual}.`,
   }));

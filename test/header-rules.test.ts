@@ -130,15 +130,86 @@ describe('assessSpamSignals — identity', () => {
     expect(result.score).toBeGreaterThanOrEqual(SUSPICIOUS_THRESHOLD);
   });
 
-  // KNOWN LIMITATION: the rule needs a DOMAIN in the display name, because a
-  // bare word is resolved by no list — `tldts` would happily turn a surname
-  // into a brand. So "PayPal Service" <billing@evil.ru>, with no dot in the
-  // name, is NOT caught here. Closing that needs a curated brand-name list,
-  // which is roadmap item 2, not a tweak to this rule.
-  it('LIMITATION: a bare brand word in the display name is not matched', () => {
+  // Regression: the limitation this rule shipped with, closed. "PayPal
+  // Service" <billing@evil.ru> has no dot in the name, so the domain rule has
+  // nothing to resolve; the brand list is what catches it — under the brand's
+  // OWN reason id, not display-name-spoof, so a reader can tell the two tells
+  // apart.
+  it('scores a bare protected brand name on a stranger’s address as brand impersonation', () => {
+    const result = assessSpamSignals({
+      ...CLEAN,
+      fromName: 'PayPal Service',
+      fromAddress: 'billing@evil.ru',
+    });
+    const reason = result.reasons.find((r) => r.id === 'brand-impersonation');
+    expect(reason?.points).toBe(3);
+    expect(reason?.detail).toContain('PayPal');
+    expect(reason?.detail).toContain('evil.ru');
+    expect(result.reasons.map((r) => r.id)).not.toContain('display-name-spoof');
+  });
+
+  // The lure this rule was written for, headers only: perfect authentication
+  // for a domain the attacker owns, a brand name in the display name, nothing
+  // else wrong. Suspicious on the name alone — and NOT spam, because one name
+  // is one signal and a weight of 3 is the promise that it stays that way.
+  it('is suspicious but not filed on the brand name alone, even with DMARC passing', () => {
+    const result = assessSpamSignals({
+      ...CLEAN,
+      fromName: 'Adobe Acrobat Sign',
+      fromAddress: 'Adobesign@powersublinks.com',
+      auth: auth(),
+    });
+    expect(result.reasons.map((r) => r.id)).toEqual(['brand-impersonation']);
+    expect(result.suspicious).toBe(true);
+    expect(result.isSpam).toBe(false);
+  });
+
+  it('does not score the brand writing under its own name, from any of its domains', () => {
     expect(
-      ids({ ...CLEAN, fromName: 'PayPal Service', fromAddress: 'billing@evil.ru' }),
-    ).not.toContain('display-name-spoof');
+      ids({ ...CLEAN, fromName: 'Adobe Acrobat Sign', fromAddress: 'adobesign@adobesign.com' }),
+    ).toEqual([]);
+    expect(
+      ids({
+        ...CLEAN,
+        fromName: 'Adobe Acrobat Sign',
+        fromAddress: 'echosign@documents.adobe.com',
+      }),
+    ).toEqual([]);
+  });
+
+  // Regression: a Google Group that carries a brand's posts rewrites From to
+  // "Brand via Group" <group@googlegroups.com> and sets List-Id. Charging that
+  // as impersonation would flag every brand that posts to a list — so both the
+  // header the scorer can see and the marker the shield can see are honoured.
+  it('exempts list mail — a List-Id, or a " via " rewrite — from the brand rule', () => {
+    const listed = assessSpamSignals({
+      ...CLEAN,
+      fromName: 'DocuSign Support',
+      fromAddress: 'group@googlegroups.com',
+      headers: headerLookupFromText(
+        'List-Id: <group.googlegroups.com>\r\nList-Unsubscribe: <https://x/u>',
+      ),
+    });
+    expect(listed.reasons.map((r) => r.id)).not.toContain('brand-impersonation');
+    expect(
+      ids({
+        ...CLEAN,
+        fromName: 'DocuSign Support via Vendors',
+        fromAddress: 'vendors@groups.example',
+      }),
+    ).not.toContain('brand-impersonation');
+  });
+
+  // One display name is one lie: a name that embeds PayPal's domain AND
+  // PayPal's brand must be charged once, by the more specific rule.
+  it('does not charge the brand rule on top of the domain rule for one name', () => {
+    const reasons = ids({
+      ...CLEAN,
+      fromName: 'PayPal <service@paypal.com>',
+      fromAddress: 'billing@evil.ru',
+    });
+    expect(reasons).toContain('display-name-spoof');
+    expect(reasons).not.toContain('brand-impersonation');
   });
 
   it('flags a punycode sender domain as a caution, not a verdict', () => {
@@ -215,6 +286,20 @@ describe('assessSpamSignals — plumbing a real client always gets right', () =>
     );
   });
 
+  // Regression: the header forgery the Adobe Sign lure carried. In-Reply-To
+  // naming the message's own Message-ID is something no client produces, and
+  // it must be its own reason so a reader is told the threading was forged.
+  it('scores an In-Reply-To that names the message’s own Message-ID', () => {
+    const own = CLEAN.messageId as string;
+    const reason = assessSpamSignals({ ...CLEAN, inReplyTo: own }).reasons.find(
+      (r) => r.id === 'in-reply-to-self',
+    );
+    expect(reason?.points).toBe(2);
+    expect(ids({ ...CLEAN, inReplyTo: '<other@example.net>' })).not.toContain('in-reply-to-self');
+    // No Message-ID at all is the missing-message-id rule's business, not this one's.
+    expect(ids({ ...CLEAN, messageId: null, inReplyTo: '' })).not.toContain('in-reply-to-self');
+  });
+
   it('scores a message with no visible recipient', () => {
     expect(ids({ ...CLEAN, toAddress: null, ccAddress: null })).toContain('no-recipient');
     expect(ids({ ...CLEAN, toAddress: null, ccAddress: 'x@sarv.com' })).not.toContain(
@@ -280,6 +365,22 @@ describe('assessSpamSignals — the combinations the weights were chosen for', (
       auth: auth({ dmarc: 'fail' }),
     });
     expect(result.score).toBeGreaterThanOrEqual(SPAM_THRESHOLD);
+  });
+
+  // The Adobe Sign lure, headers only: a borrowed brand name and forged
+  // threading on a domain that authenticated perfectly. 3 + 2 crosses the line
+  // with no help from the body — and no help from authentication, which passed.
+  it('a borrowed brand name with forged threading reaches spam (3 + 2)', () => {
+    const result = assessSpamSignals({
+      ...CLEAN,
+      fromName: 'Adobe Acrobat Sign',
+      fromAddress: 'Adobesign@powersublinks.com',
+      messageId: '<H2BLQ5A3@powersublinks.com>',
+      inReplyTo: '<H2BLQ5A3@powersublinks.com>',
+      auth: auth(),
+    });
+    expect(result.score).toBe(SPAM_THRESHOLD);
+    expect(result.isSpam).toBe(true);
   });
 
   // Regression: two weak signals must NOT add up to a filing decision. A

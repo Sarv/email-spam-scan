@@ -253,7 +253,12 @@ ones.
 **Sender identity** (`assessSender`) — the friendly name claims one brand while
 the address belongs to another registrable domain. Compared at eTLD+1 via
 `tldts`, so `mail.paypal.com` vs `paypal.com` does **not** fire, while
-`paypal.com` vs `paypal.secure-login.ru` does.
+`paypal.com` vs `paypal.secure-login.ru` does. A name with no domain in it is
+checked against the protected brands in `src/data/brands.ts`: `"Adobe Acrobat
+Sign" <Adobesign@powersublinks.com>` borrows a name whose owner never writes
+from that domain, and is reported with the same severity — whatever SPF, DKIM
+and DMARC said about powersublinks.com, which the attacker owns and was free
+to authenticate.
 
 **Authentication results** (`extractAuthHeaderBlock`, `parseAuthenticationHeaders`)
 — reads the SPF/DKIM/DMARC verdicts your own MTA already wrote into
@@ -276,7 +281,7 @@ domain it claims, asked over DNS. Its own entry point, no default list of zones,
 and never reached by accident. See
 [Reputation: asking somebody else](#reputation-asking-somebody-else).
 
-**The header scorer** (`assessSpamSignals`) — sixteen rules over the envelope,
+**The header scorer** (`assessSpamSignals`) — eighteen rules over the envelope,
 the threading headers, the authentication verdict and the bulk-mail headers.
 Listed in full under [The header rules](#the-header-rules).
 
@@ -356,11 +361,13 @@ recipient themselves said so.
 | `known-spammer` | 5 | The caller says the recipient reported this sender |
 | `auth-failed` | 3 | DMARC failed — or, only when DMARC is unknown, SPF **and** DKIM both failed |
 | `display-name-spoof` | 3 | The friendly name claims a domain the address does not belong to |
+| `brand-impersonation` | 3 | The friendly name borrows a protected brand's name (`PROTECTED_BRANDS`) on an address outside that brand's own domains — and outside any domain that carries the brand's name, so a bank writing from an unlisted `axisbankmail.bank.in` is not judged. Not charged on list mail (`List-Id`) or a ` via ` rewrite. Deliberately blind to lookalike domains (`paypal-secure.example`), which are a different tell |
 | `sender-invalid` | 2 | No sender address, or one RFC 5322 cannot parse |
 | `reply-to-freemail` | 2 | Replies go to free webmail while the message claims a corporate domain |
 | `missing-message-id` | 2 | No `Message-ID` — every real mail server adds one |
 | `date-skew` | 2 | The `Date` header is more than 96 hours from when the server received it |
 | `fake-reply` | 2 | A `Re:` subject with no `In-Reply-To` and no `References` |
+| `in-reply-to-self` | 2 | `In-Reply-To` names the message's own `Message-ID` — a reply to itself, which no mail client produces |
 | `sender-punycode` | 1 | The sender domain is punycode/IDN — a homograph risk, not proof |
 | `reply-to-mismatch` | 1 | Replies go to a different registrable domain than the sender's |
 | `malformed-message-id` | 1 | A `Message-ID` that is not `<local@domain>` |
@@ -371,7 +378,8 @@ recipient themselves said so.
 
 The weights are chosen so the classic combinations cross the line while no
 single benign anomaly does: a spoofed display name on a message that failed
-DMARC is 3 + 3, a forged `Re:` from an unauthenticated sender is 2 + 3. A
+DMARC is 3 + 3, a forged `Re:` from an unauthenticated sender is 2 + 3, a
+borrowed brand name on a message that forges its own threading is 3 + 2. A
 forwarder that breaks DKIM, a cron job with no `Message-ID`, a home address in
 `Reply-To` — each is one point or three, and each stays below 5 on its own.
 
@@ -381,7 +389,7 @@ never asked for is a rule that silently never fires.
 
 ## The content rules
 
-`assessContentSignals({ subject, text, html })` scores what the sender wrote.
+`assessContentSignals({ subject, text, html, recipientDomains? })` scores what the sender wrote.
 Everything they did not write is removed first: quoted history, the signature
 after a `-- ` delimiter, the mail client's own footer, and anything inside a
 `blockquote` or a client's quote container (`gmail_quote`, `moz-cite-prefix`,
@@ -393,7 +401,7 @@ double every hit for no reason but the MIME shape.
 | --- | --- | --- |
 | `content-spam-vocabulary` | 1–2 | The sender's words match a scam vocabulary group. Once per group, capped at 2 overall |
 | `content-hidden-text` | 2 | 120+ characters the message's own styling hides from the reader |
-| `link-display-mismatch` | 2 each | A link's visible text names one registrable domain while its `href` goes to another. Up to three |
+| `link-display-mismatch` | 2–4 each | A link's visible text names one registrable domain while its `href` goes to another. Up to three. 4 when the text names one of the caller's `recipientDomains` — the reader's own organisation — 3 when it names a protected brand's domain, 2 otherwise |
 | `link-userinfo` | 2 | A link hides its destination behind `https://bank.example@evil.example/` |
 | `link-bare-ip` | 2 | A link points straight at an IP address rather than a domain |
 | `content-shouting` | 1 | Four or more consecutive words in capitals, or runs of `!!!` |
@@ -408,7 +416,10 @@ group in the corpus **and** shouting the whole way through still cannot file a
 message. The hidden-text and link rules are *facts about the bytes* — where a
 link actually points, what the markup hid — and those accumulate without a cap,
 because four of them at once is not a stronger opinion, it is four separate
-deceptions. No single rule anywhere in the stage is worth more than 2 points.
+deceptions. No single rule anywhere in the stage can reach `SPAM_THRESHOLD` on
+its own; the heaviest, a link dressed as the reader's own domain, is 4. Pass
+`recipientDomains` — the To and Cc addresses and the mailbox owner's own — to
+turn that tier on; `scan` does it for you.
 
 **The word lists are data, in this repo, enrichable by pull request.**
 `src/data/spam-phrases.ts` groups phrases by the scam rather than by the word,
@@ -901,7 +912,11 @@ are, but not nothing.
 - `registrableDomain(input): string | null` — eTLD+1
 - `domainOfAddress(address): string | null`
 - `domainsInText(text): string[]`
-- `assessSender(name, address): PhishingReason[]`
+- `assessSender(name, address): PhishingReason[]` — each reason carries a `kind`: `domain`, `brand` or `punycode`
+- `brandsNamedIn(text): ProtectedBrand[]`, `brandOwningDomain(host): ProtectedBrand | null`,
+  `domainCarriesBrandName(brand, host): boolean`,
+  `impersonatedBrand(name, senderDomain): ProtectedBrand | null` — the brand rule in pieces
+- `PROTECTED_BRANDS` — the list, enrichable by pull request (see `src/data/brands.ts`)
 
 ### Links — `@sarv-in/mailguard/links`
 
@@ -965,7 +980,7 @@ them.
 
 ### Content — `@sarv-in/mailguard/content`
 
-- `assessContentSignals(input): SpamAssessment` — the whole stage
+- `assessContentSignals(input): SpamAssessment` — the whole stage; `input.recipientDomains` turns on the reader's-own-domain tier of the link rule
 - `bodyContent(input): BodyContent` — `{ words, anchors, hiddenText }`, what the rules saw
 - `extractHtml(html): HtmlExtract` — `{ text, quotedText, hiddenText, anchors }`
 - `ownWords(text): string`, `stripQuotedTail(text): string`, `QUOTE_MARKERS` — re-exported from `/quote` below

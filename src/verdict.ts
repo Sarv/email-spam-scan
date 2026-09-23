@@ -28,6 +28,20 @@ export const SUSPICIOUS_THRESHOLD = 3;
  * not caught up with should fail to compile, not fall through to a blank row.
  */
 export type SpamReasonId =
+  | 'fake-reply'
+  // In-Reply-To names the message's OWN Message-ID: a reply to itself, which
+  // no mail client produces and which a threading view reads as a
+  // conversation already under way.
+  | 'in-reply-to-self'
+  | 'no-recipient'
+  | 'display-name-spoof'
+  // The display name borrows a PROTECTED BRAND's name — "Adobe Acrobat Sign",
+  // "DocuSign", "PayPal" — on an address outside that brand's own domains.
+  // The sibling of display-name-spoof for the names that contain no domain,
+  // and the one check that catches a phish whose attacker-owned domain passed
+  // SPF, DKIM and DMARC: authentication says who sent it, not who they are.
+  | 'brand-impersonation'
+  | 'sender-punycode'
   | 'upstream-spam'
   | 'known-spammer'
   | 'auth-failed'
@@ -140,6 +154,7 @@ export const SPAM_REASON_STAGES: Readonly<Record<SpamReasonId, SpamStage>> = {
   'known-spammer': 'header',
   'auth-failed': 'header',
   'display-name-spoof': 'header',
+  'brand-impersonation': 'header',
   'sender-punycode': 'header',
   'sender-invalid': 'header',
   'reply-to-freemail': 'header',
@@ -149,6 +164,7 @@ export const SPAM_REASON_STAGES: Readonly<Record<SpamReasonId, SpamStage>> = {
   'missing-date': 'header',
   'date-skew': 'header',
   'fake-reply': 'header',
+  'in-reply-to-self': 'header',
   'no-recipient': 'header',
   'bulk-no-unsubscribe': 'header',
   'precedence-junk': 'header',

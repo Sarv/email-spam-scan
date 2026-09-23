@@ -35,6 +35,7 @@ describe('with no DOMParser at all', () => {
     expect(linkMismatches(HTML)).toEqual([{ shown: 'paypal.com', actual: 'evil.ru' }]);
     expect(assessLinks(HTML)).toEqual([
       {
+        kind: 'link',
         severity: 'caution',
         text: 'A link that appears to go to paypal.com actually points to evil.ru.',
       },

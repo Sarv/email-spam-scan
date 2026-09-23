@@ -138,6 +138,29 @@ describe('assessContentSignals', () => {
     expect(reason?.detail).toContain('evil.example');
   });
 
+  // Regression: the Adobe Sign lure. "Sarv.com Engagement Letter" pointing at
+  // kuaiyudh.top is a link dressed as the READER'S OWN organisation, worth
+  // twice an anonymous mismatch; one borrowing a protected brand's domain sits
+  // between. Without the recipient list the same link is an ordinary mismatch.
+  it('weighs a deceptive link by whose name it borrowed: the reader’s domain, a brand, anyone', () => {
+    const html = [
+      '<a href="https://kuaiyudh.top/v/#reader">Sarv.com Engagement Letter - for signature</a>',
+      '<a href="https://evil.example/x">https://paypal.com/login</a>',
+      '<a href="https://evil.example/y">https://bank.example/login</a>',
+    ].join('');
+    const mismatches = (recipientDomains?: readonly (string | null | undefined)[]) =>
+      assessContentSignals({ html, recipientDomains })
+        .reasons.filter((r) => r.id === 'link-display-mismatch')
+        .map((r) => [r.points, r.detail] as const);
+    expect(mismatches(['rc@sarv.com', 'mail.sarv.com', null, undefined, ''])).toEqual([
+      [4, expect.stringContaining('your own domain sarv.com')],
+      [3, expect.stringContaining('PayPal (paypal.com)')],
+      [2, expect.stringContaining('bank.example')],
+    ]);
+    expect(mismatches()[0]?.[0]).toBe(2);
+    expect(mismatches([])[0]?.[0]).toBe(2);
+  });
+
   it('scores userinfo, bare-IP and punycode targets once each', () => {
     const ids = idsOf({
       html: [
@@ -184,8 +207,18 @@ describe('assessContentSignals', () => {
     });
     expect(worst.isSpam).toBe(true);
     for (const reason of worst.reasons) {
-      expect(reason.points, reason.id).toBeLessThanOrEqual(2);
       expect(reason.points, reason.id).toBeLessThan(SPAM_THRESHOLD);
     }
+    // The heaviest single rule in the stage — a link dressed as the reader's
+    // own domain — is still short of the line on its own. A vendor newsletter
+    // wrapping a link to the reader's site through an unlisted tracking host
+    // must not be filed on that alone.
+    const heaviest = assessContentSignals({
+      html: '<a href="https://evil.example/x">https://reader.example/x</a>',
+      recipientDomains: ['reader.example'],
+    });
+    expect(heaviest.score).toBe(4);
+    expect(heaviest.suspicious).toBe(true);
+    expect(heaviest.isSpam).toBe(false);
   });
 });

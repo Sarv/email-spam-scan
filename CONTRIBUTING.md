@@ -51,6 +51,17 @@ also means a bad entry is a bad entry for everyone.
 - **Say where it came from** in the pull request. A campaign you received, a
   public corpus, a vendor advisory.
 - **Domain entries need the registrable domain** (eTLD+1), not a full URL.
+- **A brand entry is a NAME nobody else uses, and domains the brand provably
+  sends from.** "PayPal" is one company; "Apple", "Chase" and "Visa" are a
+  fruit, a surname and a travel document, and each appears in honest display
+  names — qualify them (`apple id`) or leave them out. A domain added to a
+  brand may wear its name unchallenged, so it comes from the brand's own
+  documentation or its own headers, never from a reseller or an ESP. The full
+  bar is in the header of `src/data/brands.ts`, and `test/brands.test.ts`
+  pins the shape. Missing a brand's domain is NOT a red shield on its mail:
+  a sender domain that carries the brand's own name is never judged by the
+  rule (see `domainCarriesBrandName`), so add domains to explain, not to
+  rescue.
 - **Never add a domain because one sender abused it.** Shorteners, ESPs and
   file-sharing hosts carry both spam and ordinary mail; blocking the carrier
   punishes everyone who uses it. Those belong in the wrapper list, not the
@@ -79,6 +90,8 @@ on Linux, macOS and Windows across Node 20, 22 and 24.
 src/
   verdict.ts          thresholds, SpamReason, AuthStatus — ZERO dependencies
   identity.ts         registrable domains, sender-name spoofing — tldts only
+  text.ts             the phrase matcher the two lists share — ZERO dependencies
+  data/brands.ts      the protected brands and the domains each sends from
   headers/
     auth-results.ts   extract and read Authentication-Results
     origin-ip.ts      the public address the message came from

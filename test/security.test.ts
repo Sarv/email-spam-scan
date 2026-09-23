@@ -143,6 +143,29 @@ describe('assessEmailSecurity — the level', () => {
     ).toBe('danger');
   });
 
+  // Regression: the lure that passed every authentication check. The shield
+  // must go red on the borrowed brand name — the ONLY offline tell in the
+  // headers — and not be talked out of it by three green authentication rows.
+  it('is danger when the display name borrows a protected brand on a stranger’s address', () => {
+    const lure = assessEmailSecurity({
+      fromName: 'Adobe Acrobat Sign',
+      fromAddress: 'Adobesign@powersublinks.com',
+      auth: auth(),
+    });
+    expect(lure.level).toBe('danger');
+    expect(lure.checks.find((c) => c.id === 'sender')?.status).toBe('fail');
+    expect(lure.checks.find((c) => c.id === 'sender')?.detail).toContain('Adobe');
+    // The brand itself, from its own domain, is the arrangement working: with
+    // DMARC passing and no links to judge, that is the top level.
+    expect(
+      levelOf({
+        fromName: 'Adobe Acrobat Sign',
+        fromAddress: 'adobesign@adobesign.com',
+        auth: auth(),
+      }),
+    ).toBe('verified');
+  });
+
   it('is caution for a soft SPF result', () => {
     expect(levelOf({ auth: auth({ spf: 'softfail' }) })).toBe('caution');
     expect(levelOf({ auth: auth({ spf: 'neutral' }) })).toBe('caution');
