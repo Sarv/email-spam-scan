@@ -1,0 +1,38 @@
+# Audit the protected-brand list against the registries and the DNS.
+#
+# A domain in `src/data/brands/` may wear its brand's name unchallenged, so a
+# listed domain that lapses — or was never the brand's — is a hole in the
+# rule, and nothing in the test suite can see it: the facts live in the
+# registries. This runs `scripts/verify-brands.mjs` weekly and on every pull
+# request that touches the list, and fails on anything CRITICAL (a domain
+# nobody has registered). Warnings — no SPF, no DMARC — are printed for a
+# reviewer to read, not failed on: a brand may own a domain it never sends from.
+name: Brand audit
+
+on:
+  schedule:
+    - cron: '17 6 * * 1'
+  pull_request:
+    paths:
+      - 'src/data/brands/**'
+      - 'scripts/verify-brands.mjs'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  audit:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: pnpm/action-setup@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: pnpm
+      - run: pnpm install --frozen-lockfile
+      # 1.1.1.1 rather than the runner's resolver: brands publish dozens of TXT
+      # records at the apex, and a resolver that truncates the set drops the
+      # SPF record and reports a correctly configured brand as publishing none.
+      - run: pnpm verify:brands
