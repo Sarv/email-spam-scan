@@ -69,14 +69,30 @@ export async function fetchBounded(
 ): Promise<FetchedBytes | null> {
   const response = await fetch(url);
   if (!response.ok) return null;
+  const bytes = await readBounded(response, maxBytes, options);
+  if (bytes === null) return null;
+  return {
+    bytes,
+    contentType: (response.headers.get('content-type') ?? '').toLowerCase(),
+    url: response.url ?? url,
+  };
+}
+
+/**
+ * The body of a response the caller has already judged by status, at most
+ * `maxBytes` of it — or null when it is bigger than that. The half of
+ * {@link fetchBounded} that a caller who needs the STATUS (a 404 that means
+ * "no such domain" against a 429 that means "asked too often") uses on its own.
+ */
+export async function readBounded(
+  response: FetchResponse,
+  maxBytes: number,
+  options: FetchBoundedOptions = {},
+): Promise<Uint8Array | null> {
   const declared = Number.parseInt(response.headers.get('content-length') ?? '', 10);
   // A server that admits the size up front saves downloading the body at all.
   if (Number.isFinite(declared) && declared > maxBytes) return null;
   const body = new Uint8Array(await response.arrayBuffer());
   if (body.length > maxBytes && options.truncate !== true) return null;
-  return {
-    bytes: options.truncate === true ? body.subarray(0, maxBytes) : body,
-    contentType: (response.headers.get('content-type') ?? '').toLowerCase(),
-    url: response.url ?? url,
-  };
+  return options.truncate === true ? body.subarray(0, maxBytes) : body;
 }

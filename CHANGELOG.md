@@ -7,6 +7,28 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added
+
+- **Domain age** (`/age`, `tldts` only) — `lookupDomainAge(domain, options)`
+  reads when a domain was registered from the registry's own RDAP record
+  (RFC 9083), finding the right registry through IANA's bootstrap file, and
+  `assessDomainAge({ sender, links })` scores it: `reputation-domain-new` for
+  the sender's domain and `reputation-link-new` for the youngest domain the
+  message links to, 3 / 2 / 1 points under 7 / 30 / 90 days. The lure that
+  shipped 0.3.0 was sent from a 78-day-old domain and linked to a five-day-old
+  one that no blocklist had heard of; a blocklist lists what has been
+  reported, and fresh registration is the one fact about a campaign domain
+  that is true before that. The two reasons together are capped at
+  `DOMAIN_AGE_MAX_POINTS` (`SPAM_THRESHOLD - 1`), so age alone can never file
+  a message: a start-up's first week looks exactly like this. Every failure —
+  a TLD with no RDAP, a registry that publishes no date, a 404, a rate limit,
+  an outage — is a `status` that scores nothing, and the lookup never throws.
+  HTTPS is injected and nothing caches, as with `/brand`; a registration date
+  never changes, so callers should remember answers for weeks.
+- **`readBounded(response, maxBytes)`** (`/brand`) — the body half of
+  `fetchBounded`, for a caller that needs the status code first. Shared with
+  `/age`, so there is one place that refuses an oversized body.
+
 ## [0.3.0] - 2026-09-23
 
 ### Added

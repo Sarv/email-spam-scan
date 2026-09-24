@@ -92,6 +92,12 @@ export type SpamReasonId =
   // Same lists, different target: the sender can be a clean mailbox at a
   // clean host and the payload still a link to a phishing site.
   | 'reputation-link-listed'
+  // How recently a domain was REGISTERED, from the registry's own RDAP record.
+  // The one fact about a campaign domain that is true before anybody has
+  // reported it — which is the window a blocklist is blind in. Sender and
+  // link domains separately, like the listings above.
+  | 'reputation-domain-new'
+  | 'reputation-link-new'
   // The one signal in that stage that comes from neither the message nor a
   // blocklist: how many OTHER recipients have reported mail from this sender.
   // Only a host holding many mailboxes can count it, so nothing in this
@@ -185,6 +191,8 @@ export const SPAM_REASON_STAGES: Readonly<Record<SpamReasonId, SpamStage>> = {
   'reputation-ip-listed': 'reputation',
   'reputation-domain-listed': 'reputation',
   'reputation-link-listed': 'reputation',
+  'reputation-domain-new': 'reputation',
+  'reputation-link-new': 'reputation',
   'reputation-user-reported': 'reputation',
 };
 

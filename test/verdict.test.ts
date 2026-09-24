@@ -196,8 +196,10 @@ describe('SPAM_REASON_STAGES', () => {
     ]);
     expect(byStage('reputation')).toEqual([
       'reputation-domain-listed',
+      'reputation-domain-new',
       'reputation-ip-listed',
       'reputation-link-listed',
+      'reputation-link-new',
       'reputation-user-reported',
     ]);
   });

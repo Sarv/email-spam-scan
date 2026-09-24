@@ -148,6 +148,16 @@
         "types": "./dist/brand.d.cts",
         "default": "./dist/brand.cjs"
       }
+    },
+    "./age": {
+      "import": {
+        "types": "./dist/age.d.ts",
+        "default": "./dist/age.js"
+      },
+      "require": {
+        "types": "./dist/age.d.cts",
+        "default": "./dist/age.cjs"
+      }
     }
   },
   "main": "./dist/index.cjs",

@@ -55,6 +55,9 @@ const EXPECTED: Record<string, readonly string[]> = {
   // consumer who only wants a logo or a favicon installs none of it. The
   // assertion below is what keeps that true.
   'src/brand/index.ts': ['htmlparser2', 'tldts'],
+  // The registration-date lookup: `tldts` to reduce a host to the domain a
+  // registry knows, and an injected fetch for the rest. No parser, no DNS.
+  'src/age.ts': ['tldts'],
   'src/links.ts': ['htmlparser2', 'tldts'],
   'src/security.ts': ['htmlparser2', 'tldts'],
   'src/content/index.ts': ['htmlparser2', 'tldts'],
@@ -162,6 +165,7 @@ describe('entry-point dependency cost', () => {
   it('re-exports every narrow entry from the main entry', () => {
     const barrel = readFileSync(resolve(SRC_ROOT, 'src/index.ts'), 'utf8');
     for (const path of [
+      './age.js',
       './attachments/index.js',
       './content/index.js',
       './headers/index.js',

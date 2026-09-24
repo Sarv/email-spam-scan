@@ -67,6 +67,12 @@ export default defineConfig({
     // (`@peculiar/x509`, `asn1js`) is optional and dynamically imported, for
     // the same reason `mailauth` is.
     brand: 'src/brand/index.ts',
+    // `age` asks a registry when a domain was registered, over RDAP. Like
+    // `brand` it reaches the network only through an injected fetch, so a
+    // browser can import it, and like `reputation` it is never called by
+    // `scan`: the caller does the lookup on its own schedule and hands the
+    // assessment back.
+    age: 'src/age.ts',
   },
   format: ['esm', 'cjs'],
   dts: true,

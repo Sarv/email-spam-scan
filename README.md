@@ -70,7 +70,7 @@ or newer; every other entry runs on 20.
 
 ## Entry points
 
-Twelve, so a browser bundle never has to carry what only a server needs.
+Thirteen, so a browser bundle never has to carry what only a server needs.
 
 | Import | Dependencies | Use it for |
 | --- | --- | --- |
@@ -87,6 +87,7 @@ Twelve, so a browser bundle never has to carry what only a server needs.
 | `@sarv-in/mailguard/verify` | **none statically** — `mailauth`, an optional peer, is `import`ed on first use | Real SPF/DKIM/DMARC verification against DNS. One of the two entries that can make a network call. |
 | `@sarv-in/mailguard/reputation` | `ipaddr.js` — `node:dns` is `import`ed on first use | Blocklist lookups for a sending address or a domain. Node only, and it queries nothing you did not name. |
 | `@sarv-in/mailguard/brand` | `tldts`, `htmlparser2` — `@peculiar/x509` and `asn1js`, both optional peers, are `import`ed on first use | The sender's mark: the BIMI logo a domain publishes, the certificate that verifies it, and the favicon that stands in. Runs in a browser; DNS and HTTPS are injected. |
+| `@sarv-in/mailguard/age` | `tldts` | When a domain was registered, from the registry's own RDAP record, and what that is worth. Runs in a browser; HTTPS is injected. |
 
 The split exists because the common case in a mail client is displaying a
 verdict that was computed at ingest, hours ago, on a server. That side needs
@@ -280,6 +281,14 @@ have already published about the machine that delivered a message and the
 domain it claims, asked over DNS. Its own entry point, no default list of zones,
 and never reached by accident. See
 [Reputation: asking somebody else](#reputation-asking-somebody-else).
+
+**Domain age** (`lookupDomainAge`, `assessDomainAge`) — how long ago the
+sender's domain, and the domains a message links to, were registered,
+read from the registry's own RDAP record. The one fact about a campaign
+domain that is true before anybody has reported it, which is the window a
+blocklist is blind in; never enough to file a message on its own. Its own
+entry point, its own fetch, and never reached by `scan`. See
+[Domain age: how new is the domain](#domain-age-how-new-is-the-domain).
 
 **The header scorer** (`assessSpamSignals`) — eighteen rules over the envelope,
 the threading headers, the authentication verdict and the bulk-mail headers.
@@ -826,6 +835,50 @@ query at a time.
 the entry costs a browser bundle `ipaddr.js` and nothing else — but calling
 `checkReputation` without an injected `query` needs a Node resolver.
 
+## Domain age: how new is the domain
+
+```ts
+import { assessDomainAge, fetchRdapBootstrap, lookupDomainAge } from '@sarv-in/mailguard/age';
+
+const bootstrap = await fetchRdapBootstrap(); // IANA's TLD → RDAP server table; fetch it once and keep it
+const sender = await lookupDomainAge('powersublinks.com', { bootstrap });
+const links = await Promise.all(linkDomains.map((d) => lookupDomainAge(d, { bootstrap })));
+const age = assessDomainAge({ sender, links }); // a SpamAssessment, for mergeAssessments
+```
+
+The lure that motivated this was sent from a domain registered 78 days
+earlier and linked to one registered **five** days earlier. Neither was on any
+blocklist — a blocklist lists what has been reported, and a five-day-old
+domain has not been. Registration date is the one fact about a phishing domain
+that is true from the moment it is used, and RDAP (RFC 9083, mandatory for
+every gTLD since 2019) is the registries' own JSON service for it: one HTTPS
+GET per domain, no key, no port-43 WHOIS.
+
+| Reason id | Points | Fires when |
+| --- | --- | --- |
+| `reputation-domain-new` | 3 / 2 / 1 | The sender's registrable domain was registered under 7 / 30 / 90 days ago |
+| `reputation-link-new` | 3 / 2 / 1 | The **youngest** domain the message links to was registered under 7 / 30 / 90 days ago |
+
+**Age alone never files a message.** The two together are capped at
+`DOMAIN_AGE_MAX_POINTS` (`SPAM_THRESHOLD - 1`): a start-up's first mail from
+its first domain to its first prospect is every signal here at once, and it is
+not spam. It corroborates what the header and content stages found — on the
+lure above, 1 + 3 on top of everything else.
+
+**What comes back when it cannot answer is `status`, not a throw.**
+`unsupported` for a TLD with no RDAP service (many ccTLDs) or a registry that
+publishes no registration date; `not-found` for a domain the registry has no
+record of; `error` for a refusal, a rate limit, an outage or an unreadable
+record. None of them scores. The lookup takes an injected `fetch`, so it runs
+wherever your fetch does and a test never opens a socket.
+
+**Nothing here caches, and you should.** A registration date never changes, so
+remember an answer for weeks rather than hours; the bootstrap file changes
+rarely, so fetch it once per process with `fetchRdapBootstrap` and pass it to
+every lookup. Every lookup tells a registry which domain your user received
+mail from, which is the same disclosure a blocklist query makes — put it
+behind the same setting.
+
 ## Brand marks: BIMI, VMC and favicons
 
 `/brand` answers a different question from the rest of the package. The
@@ -959,6 +1012,17 @@ you name it.
 - `reverseIpLabel(ip)`, `normalizeQueryDomain(domain)`, `blocklistQueryName(target, blocklist)` — the query names, on their own
 - `readBlocklistCodes(blocklist, codes): CodeReading` — what a set of return codes means
 - `type Blocklist`, `BlocklistCode`, `BlocklistCategory`, `BlocklistKind`, `BlocklistHit`, `CodeReading`, `DnsQuery`, `ReputationOptions`, `ReputationBatchOptions`, `AssessReputationOptions`, `ReputationResult`, `ReputationTarget`, `ReputationLookupError`
+
+### Age — `@sarv-in/mailguard/age`
+
+Runs anywhere; HTTPS is injected.
+
+- `lookupDomainAge(domain, options?): Promise<DomainAgeLookup>` — the registration date, age in days, registrar and RDAP server; never throws
+- `assessDomainAge({ sender, links }, options?): SpamAssessment` — scored, capped at `DOMAIN_AGE_MAX_POINTS`
+- `fetchRdapBootstrap(fetch?): Promise<RdapBootstrap | null>` — IANA's TLD table, to fetch once and pass in
+- `rdapServerFor(domain, bootstrap): string | null`, `domainAgePoints(ageDays): number`
+- `DOMAIN_AGE_TIERS`, `DOMAIN_AGE_MAX_POINTS`, `RDAP_BOOTSTRAP_URL`, `RDAP_MAX_BYTES`
+- `type DomainAgeLookup`, `DomainAgeStatus`, `DomainAgeOptions`, `DomainAgeSubjects`, `AssessDomainAgeOptions`, `RdapBootstrap`
 
 ### Brand — `@sarv-in/mailguard/brand`
 

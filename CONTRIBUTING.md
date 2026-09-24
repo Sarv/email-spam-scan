@@ -92,6 +92,7 @@ src/
   identity.ts         registrable domains, sender-name spoofing — tldts only
   text.ts             the phrase matcher the two lists share — ZERO dependencies
   data/brands.ts      the protected brands and the domains each sends from
+  age.ts              when a domain was registered, over RDAP — tldts only
   headers/
     auth-results.ts   extract and read Authentication-Results
     origin-ip.ts      the public address the message came from

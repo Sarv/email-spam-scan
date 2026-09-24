@@ -236,6 +236,23 @@ export {
   type ReputationTarget,
 } from './reputation.js';
 export {
+  assessDomainAge,
+  domainAgePoints,
+  fetchRdapBootstrap,
+  lookupDomainAge,
+  rdapServerFor,
+  DOMAIN_AGE_MAX_POINTS,
+  DOMAIN_AGE_TIERS,
+  RDAP_BOOTSTRAP_URL,
+  RDAP_MAX_BYTES,
+  type AssessDomainAgeOptions,
+  type DomainAgeLookup,
+  type DomainAgeOptions,
+  type DomainAgeStatus,
+  type DomainAgeSubjects,
+  type RdapBootstrap,
+} from './age.js';
+export {
   checkBimiSvg,
   decodeLogoDataUri,
   defaultFetch,
