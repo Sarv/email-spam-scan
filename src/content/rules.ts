@@ -39,7 +39,7 @@
  * answer is a pure function of the bytes handed in, which is what makes a
  * score reproducible months later when somebody asks why their mail was filed.
  */
-import { brandOwningDomain, registrableDomain } from '../identity.js';
+import { brandOwningDomain, registrableDomain, type ProtectedBrand } from '../identity.js';
 import {
   anchorMismatches,
   linkTarget,
@@ -74,6 +74,11 @@ export interface ContentSignalInput {
    * registrable domain, and anything unresolvable is ignored.
    */
   recipientDomains?: readonly (string | null | undefined)[];
+  /**
+   * The protected brands whose domains a deceptive link's text may borrow for
+   * the 3-point tier. Defaults to `PROTECTED_BRANDS`.
+   */
+  brands?: readonly ProtectedBrand[];
 }
 
 /**
@@ -229,7 +234,7 @@ export function assessContentSignals(input: ContentSignalInput): SpamAssessment 
       );
       continue;
     }
-    const brand = brandOwningDomain(shown);
+    const brand = brandOwningDomain(shown, input.brands);
     if (brand) {
       add(
         'link-display-mismatch',

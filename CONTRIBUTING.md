@@ -56,9 +56,14 @@ also means a bad entry is a bad entry for everyone.
   fruit, a surname and a travel document, and each appears in honest display
   names — qualify them (`apple id`) or leave them out. A domain added to a
   brand may wear its name unchallenged, so it comes from the brand's own
-  documentation or its own headers, never from a reseller or an ESP. The full
-  bar is in the header of `src/data/brands.ts`, and `test/brands.test.ts`
-  pins the shape. Missing a brand's domain is NOT a red shield on its mail:
+  documentation or its own headers, never from a reseller or an ESP, and
+  NEVER a free mailbox host (gmail.com, outlook.com, icloud.com): anybody can
+  open an address there, so it can vouch for no brand. One file per brand in
+  `src/data/brands/`; a new brand cites `sources` (HTTPS pages a reviewer can
+  open) and the `verified` date someone opened them. The full bar is in
+  `src/data/brands/index.ts`, `test/brands.test.ts` pins the shape, and
+  `pnpm verify:brands` checks every listed domain against the registries and
+  the DNS — run it before you open the pull request; CI runs it weekly. Missing a brand's domain is NOT a red shield on its mail:
   a sender domain that carries the brand's own name is never judged by the
   rule (see `domainCarriesBrandName`), so add domains to explain, not to
   rescue.
@@ -91,7 +96,7 @@ src/
   verdict.ts          thresholds, SpamReason, AuthStatus — ZERO dependencies
   identity.ts         registrable domains, sender-name spoofing — tldts only
   text.ts             the phrase matcher the two lists share — ZERO dependencies
-  data/brands.ts      the protected brands and the domains each sends from
+  data/brands/        the protected brands, one file each, and the domains each sends from
   age.ts              when a domain was registered, over RDAP — tldts only
   headers/
     auth-results.ts   extract and read Authentication-Results

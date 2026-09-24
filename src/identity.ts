@@ -30,13 +30,13 @@
  * attacker's own domain. Authentication says who sent a message; it cannot
  * say whether that sender is who the name claims. The second check closes
  * that: a curated list of protected brands and the domains each actually
- * sends from (`./data/brands.ts`), so a name borrowed from the list on an
+ * sends from (`./data/brands/`, one file per brand), so a name borrowed from the list on an
  * address outside its domains is the same lie as the embedded domain — and
  * is reported with the same severity.
  */
 import { getDomain, parse as parseHost } from 'tldts';
 
-import { PROTECTED_BRANDS, type ProtectedBrand } from './data/brands.js';
+import { PROTECTED_BRANDS, type ProtectedBrand } from './data/brands/index.js';
 import { containsPhrase, normalizeForMatching } from './text.js';
 
 export type { ProtectedBrand };
@@ -102,16 +102,50 @@ export function domainsInText(text: string | null | undefined): string[] {
 }
 
 /**
+ * One domain → brand map per brand list, built on first use and kept for as
+ * long as the list is. A `WeakMap` keyed by the array itself, so a caller's
+ * own list gets its own index and is not held alive by it — which is also
+ * why a list should be treated as immutable once it has been used: a later
+ * edit to the same array is not seen. Where two brands list one domain, the
+ * first wins, as a linear scan would have.
+ */
+const DOMAIN_INDEXES = new WeakMap<
+  readonly ProtectedBrand[],
+  ReadonlyMap<string, ProtectedBrand>
+>();
+
+function domainIndex(brands: readonly ProtectedBrand[]): ReadonlyMap<string, ProtectedBrand> {
+  const known = DOMAIN_INDEXES.get(brands);
+  if (known) return known;
+  const index = new Map<string, ProtectedBrand>();
+  for (const brand of brands) {
+    for (const domain of brand.domains) {
+      // A caller's list is not held to the built-in list's hygiene test, so
+      // its entries are reduced the same way a sender's domain is.
+      const key = registrableDomain(domain);
+      if (key !== null && !index.has(key)) index.set(key, brand);
+    }
+  }
+  DOMAIN_INDEXES.set(brands, index);
+  return index;
+}
+
+/**
  * The protected brand whose own domains include this host, or null.
  *
  * Compared at eTLD+1, so `documents.adobe.com` is Adobe's and
  * `adobe.com.evil.example` is not — the registrable domain of the latter is
  * `evil.example`, whatever the labels in front of it say.
+ *
+ * @param brands the list to consult. Defaults to {@link PROTECTED_BRANDS}; pass `[...PROTECTED_BRANDS, yours]` to add to it, or your own list to replace it.
  */
-export function brandOwningDomain(host: string | null | undefined): ProtectedBrand | null {
+export function brandOwningDomain(
+  host: string | null | undefined,
+  brands: readonly ProtectedBrand[] = PROTECTED_BRANDS,
+): ProtectedBrand | null {
   const domain = registrableDomain(host);
   if (!domain) return null;
-  return PROTECTED_BRANDS.find((brand) => brand.domains.includes(domain)) ?? null;
+  return domainIndex(brands).get(domain) ?? null;
 }
 
 /**
@@ -122,12 +156,13 @@ export function brandOwningDomain(host: string | null | undefined): ProtectedBra
  * NFKC lookalikes and zero-width separators are all collapsed first, so
  * `ＰａｙＰａｌ` and `Pay<U+200B>Pal` both match and `paypalooza` does not.
  */
-export function brandsNamedIn(text: string | null | undefined): ProtectedBrand[] {
+export function brandsNamedIn(
+  text: string | null | undefined,
+  brands: readonly ProtectedBrand[] = PROTECTED_BRANDS,
+): ProtectedBrand[] {
   const haystack = normalizeForMatching(text);
   if (!haystack) return [];
-  return PROTECTED_BRANDS.filter((brand) =>
-    brand.phrases.some((phrase) => containsPhrase(haystack, phrase)),
-  );
+  return brands.filter((brand) => brand.phrases.some((phrase) => containsPhrase(haystack, phrase)));
 }
 
 /**
@@ -188,16 +223,19 @@ const LIST_REWRITE_MARKER = ' via ';
  * The protected brand a display name borrows on an address that is not the
  * brand's own, or null when the name borrows nothing — or when it is the
  * brand itself writing.
+ *
+ * @param brands the list to consult. Defaults to {@link PROTECTED_BRANDS}; pass `[...PROTECTED_BRANDS, yours]` to add to it, or your own list to replace it.
  */
 export function impersonatedBrand(
   fromName: string | null | undefined,
   senderDomain: string | null | undefined,
+  brands: readonly ProtectedBrand[] = PROTECTED_BRANDS,
 ): ProtectedBrand | null {
   const name = normalizeForMatching(fromName);
   if (!name || name.includes(LIST_REWRITE_MARKER)) return null;
   // The brand writing under its own name is the arrangement working.
-  if (brandOwningDomain(senderDomain)) return null;
-  const brand = brandsNamedIn(name)[0];
+  if (brandOwningDomain(senderDomain, brands)) return null;
+  const brand = brandsNamedIn(name, brands)[0];
   if (!brand) return null;
   // ...and so is the brand writing from a domain the list has not heard of
   // but that carries its name. See {@link domainCarriesBrandName}.
@@ -218,10 +256,14 @@ export function impersonatedBrand(
  * on evil.ru names PayPal's domain AND PayPal's brand, and it is one lie. The
  * domain check speaks, because it is the more specific claim, and the brand
  * check is only consulted when no domain was named.
+ *
+ * @param brands the protected brands to judge the name against. Defaults to {@link PROTECTED_BRANDS}; pass `[...PROTECTED_BRANDS, yours]` to add to it, or your own list to replace it —
+ *   a mail client adds the mailbox owner's own organisation this way.
  */
 export function assessSender(
   fromName: string | null | undefined,
   fromAddress: string | null | undefined,
+  brands: readonly ProtectedBrand[] = PROTECTED_BRANDS,
 ): PhishingReason[] {
   const reasons: PhishingReason[] = [];
   const senderDomain = domainOfAddress(fromAddress);
@@ -236,7 +278,7 @@ export function assessSender(
     });
   } else {
     const shown = fromName?.trim();
-    const brand = shown ? impersonatedBrand(shown, senderDomain) : null;
+    const brand = shown ? impersonatedBrand(shown, senderDomain, brands) : null;
     if (brand) {
       reasons.push({
         kind: 'brand',

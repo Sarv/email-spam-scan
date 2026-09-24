@@ -222,3 +222,17 @@ describe('assessContentSignals', () => {
     expect(heaviest.isSpam).toBe(false);
   });
 });
+
+describe('assessContentSignals — a caller-supplied brand list', () => {
+  const ACME = { id: 'acme', name: 'Acme Corp', phrases: ['acme corp'], domains: ['acme.example'] };
+  // The 3-point tier is for a link whose text names a PROTECTED brand's
+  // domain; a brand the caller protects is one.
+  it('weighs a link dressed as a brand only the caller protects at 3', () => {
+    const html = '<a href="https://evil.example/x">https://acme.example/login</a>';
+    const points = (brands?: readonly (typeof ACME)[]) =>
+      assessContentSignals({ html, brands }).reasons.find((r) => r.id === 'link-display-mismatch')
+        ?.points;
+    expect(points()).toBe(2);
+    expect(points([ACME])).toBe(3);
+  });
+});

@@ -668,3 +668,12 @@ describe('worstLevel', () => {
     expect(LEVEL_RANK.caution).toBeLessThan(LEVEL_RANK.danger);
   });
 });
+
+describe('assessEmailSecurity — a caller-supplied brand list', () => {
+  const ACME = { id: 'acme', name: 'Acme Corp', phrases: ['acme corp'], domains: ['acme.example'] };
+  it('goes red on a brand only the caller protects, and not without it', () => {
+    const lure = { fromName: 'Acme Corp Billing', fromAddress: 'x@evil.example', auth: auth() };
+    expect(levelOf(lure)).not.toBe('danger');
+    expect(levelOf({ ...lure, brands: [ACME] })).toBe('danger');
+  });
+});

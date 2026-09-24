@@ -1,0 +1,36 @@
+import type { ProtectedBrand } from './types.js';
+
+export const amazon = {
+  id: 'amazon',
+  name: 'Amazon',
+  phrases: [
+    'amazon account',
+    'amazon customer service',
+    'amazon payments',
+    'amazon prime',
+    'amazon security',
+    'amazon support',
+    'amazon web services',
+  ],
+  domains: [
+    'amazon.ae',
+    'amazon.ca',
+    'amazon.co.jp',
+    'amazon.co.uk',
+    'amazon.com',
+    'amazon.com.au',
+    'amazon.com.br',
+    'amazon.com.mx',
+    'amazon.de',
+    'amazon.es',
+    'amazon.fr',
+    'amazon.in',
+    'amazon.it',
+    'amazon.nl',
+    'amazon.sg',
+    'amazonaws.com',
+    'amazonpay.in',
+    'amazonses.com',
+    'primevideo.com',
+  ],
+} satisfies ProtectedBrand;

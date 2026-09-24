@@ -28,7 +28,7 @@
  * map the level to their own strings.
  */
 import type { BimiStatus } from './brand/bimi.js';
-import { assessSender, registrableDomain } from './identity.js';
+import { assessSender, registrableDomain, type ProtectedBrand } from './identity.js';
 import {
   linkDomainsAllMatch,
   linkMismatches,
@@ -249,6 +249,12 @@ export interface SecurityInput {
    * difference between "no mark" and "we have not asked yet".
    */
   bimi?: BrandIdentity | null;
+  /**
+   * The protected brands the sender name is judged against. Defaults to
+   * `PROTECTED_BRANDS`. Pass the same list the scorer was given, or the
+   * shield and the score will disagree about the same name.
+   */
+  brands?: readonly ProtectedBrand[];
 }
 
 /** Decide the level for one message. */
@@ -293,7 +299,7 @@ export function assessEmailSecurity(input: SecurityInput): SecurityAssessment {
   ];
 
   // Display-name impersonation.
-  const spoof = assessSender(input.fromName, input.fromAddress);
+  const spoof = assessSender(input.fromName, input.fromAddress, input.brands);
   checks.push(
     spoof.length
       ? {

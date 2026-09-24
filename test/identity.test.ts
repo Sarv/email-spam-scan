@@ -202,3 +202,76 @@ describe('brandsNamedIn / brandOwningDomain / impersonatedBrand', () => {
     expect(impersonatedBrand('PayPal', 'evil.ru')?.id).toBe('paypal');
   });
 });
+
+/**
+ * A caller's own brand list. The first consumer is a mail client that wants
+ * the mailbox owner's organisation protected too — "Acme Corp Billing" from a
+ * stranger's domain — without a pull request to this package.
+ */
+describe('a caller-supplied brand list', () => {
+  const ACME = { id: 'acme', name: 'Acme Corp', phrases: ['acme corp'], domains: ['acme.example'] };
+
+  it('judges the name against the list it is given, and against the built-in list by default', () => {
+    expect(assessSender('Acme Corp Billing', 'x@evil.example')).toEqual([]);
+    const reasons = assessSender('Acme Corp Billing', 'x@evil.example', [
+      ...PROTECTED_BRANDS,
+      ACME,
+    ]);
+    expect(reasons.map((reason) => reason.kind)).toEqual(['brand']);
+    expect(reasons[0]?.text).toContain('Acme Corp');
+    // A list that replaces the default protects only what it names.
+    expect(assessSender('PayPal Service', 'x@evil.example', [ACME])).toEqual([]);
+    expect(assessSender('Acme Corp', 'billing@mail.acme.example', [ACME])).toEqual([]);
+  });
+
+  it('threads the list through every helper', () => {
+    expect(brandsNamedIn('Acme Corp', [ACME]).map((brand) => brand.id)).toEqual(['acme']);
+    expect(brandOwningDomain('mail.acme.example', [ACME])?.id).toBe('acme');
+    expect(impersonatedBrand('Acme Corp', 'evil.example', [ACME])?.id).toBe('acme');
+  });
+
+  // A caller's list is not held to the built-in hygiene test, so a domain it
+  // lists is reduced the way a sender's is — and one that is not a domain at
+  // all is ignored rather than trusted.
+  it('reduces a caller’s domains to registrable form and ignores ones that are not domains', () => {
+    const messy = { ...ACME, domains: ['not a domain', 'MAIL.Acme.Example'] };
+    const list = [messy];
+    expect(brandOwningDomain('acme.example', list)?.id).toBe('acme');
+    // The index is built once per list and reused.
+    expect(brandOwningDomain('www.acme.example', list)?.id).toBe('acme');
+    expect(brandOwningDomain('not a domain', list)).toBeNull();
+  });
+
+  it('lets the first brand win a domain two brands both list', () => {
+    const other = { id: 'other', name: 'Other', phrases: ['other co'], domains: ['acme.example'] };
+    expect(brandOwningDomain('acme.example', [ACME, other])?.id).toBe('acme');
+    expect(brandOwningDomain('acme.example', [other, ACME])?.id).toBe('other');
+  });
+});
+
+describe('free mailbox hosts are never a brand’s own domain', () => {
+  // Regression, found by the 2026-09-24 audit: with gmail.com, outlook.com
+  // and icloud.com listed as the brands' own, these three — the commonest
+  // free-account lures — were exempt from the very rule written for them.
+  it('flags a brand name on a free mailbox address', () => {
+    expect(assessSender('Microsoft account team', 'security.alerts@outlook.com')[0]?.kind).toBe(
+      'brand',
+    );
+    expect(assessSender('Google Security', 'noreply.google.alerts@gmail.com')[0]?.kind).toBe(
+      'brand',
+    );
+    expect(assessSender('Apple Support', 'apple.id.help@icloud.com')[0]?.kind).toBe('brand');
+    expect(assessSender('Microsoft 365', 'billing@hotmail.com')[0]?.kind).toBe('brand');
+  });
+
+  it('still exempts the brands writing from their own domains', () => {
+    expect(
+      assessSender(
+        'Microsoft account team',
+        'account-security-noreply@accountprotection.microsoft.com',
+      ),
+    ).toEqual([]);
+    expect(assessSender('Google Security', 'no-reply@accounts.google.com')).toEqual([]);
+    expect(assessSender('Apple Support', 'noreply@email.apple.com')).toEqual([]);
+  });
+});

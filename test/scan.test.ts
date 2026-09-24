@@ -771,3 +771,24 @@ describe('scanMany', () => {
     expect(pulled).toBeLessThanOrEqual(seen + 8);
   });
 });
+
+describe('scan with a caller-supplied brand list', () => {
+  const ACME = { id: 'acme', name: 'Acme Corp', phrases: ['acme corp'], domains: ['acme.example'] };
+  it('judges the sender name and the link text against it', async () => {
+    const raw = message(
+      [
+        RECEIVED,
+        'From: "Acme Corp Billing" <billing@evil.example>',
+        'To: sam@test.com',
+        'Subject: Invoice',
+        'Content-Type: text/html; charset=utf-8',
+      ],
+      '<a href="https://evil.example/x">https://acme.example/pay</a>\r\n',
+    );
+    const plain = await scan(raw);
+    expect(plain.reasons.map((r) => r.id)).not.toContain('brand-impersonation');
+    const guarded = await scan(raw, { brands: [ACME] });
+    expect(guarded.reasons.map((r) => r.id)).toContain('brand-impersonation');
+    expect(guarded.reasons.find((r) => r.id === 'link-display-mismatch')?.points).toBe(3);
+  });
+});

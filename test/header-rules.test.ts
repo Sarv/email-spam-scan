@@ -424,3 +424,14 @@ describe('SPAM_HEADER_NAMES', () => {
     );
   });
 });
+
+describe('assessSpamSignals — a caller-supplied brand list', () => {
+  const ACME = { id: 'acme', name: 'Acme Corp', phrases: ['acme corp'], domains: ['acme.example'] };
+  // Regression: the scorer must judge the name against the SAME list the
+  // shield does, or the two disagree about one message.
+  it('charges brand impersonation for a brand only the caller protects', () => {
+    const input = { ...CLEAN, fromName: 'Acme Corp Billing', fromAddress: 'x@evil.example' };
+    expect(ids(input)).not.toContain('brand-impersonation');
+    expect(ids({ ...input, brands: [ACME] })).toContain('brand-impersonation');
+  });
+});

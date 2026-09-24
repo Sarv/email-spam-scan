@@ -416,3 +416,12 @@ describe('linkDomains', () => {
     expect(linkDomains(body, { includeQuoted: true })).toEqual(['theirs.example']);
   });
 });
+
+describe('assessPhishing — a caller-supplied brand list', () => {
+  const ACME = { id: 'acme', name: 'Acme Corp', phrases: ['acme corp'], domains: ['acme.example'] };
+  it('is danger for a brand only the caller protects', () => {
+    const input = { fromName: 'Acme Corp', fromAddress: 'x@evil.example', html: null };
+    expect(assessPhishing(input).level).toBe('none');
+    expect(assessPhishing({ ...input, brands: [ACME] }).level).toBe('danger');
+  });
+});

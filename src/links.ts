@@ -15,7 +15,7 @@
  * everywhere is the only version of this check that can be trusted.
  */
 import { extractHtml } from './content/html-text.js';
-import { assessSender, type PhishingReason } from './identity.js';
+import { assessSender, type PhishingReason, type ProtectedBrand } from './identity.js';
 import {
   anchorMismatches,
   linkTarget,
@@ -255,8 +255,13 @@ export function assessPhishing(input: {
   fromName?: string | null;
   fromAddress?: string | null;
   html?: string | null;
+  /** The protected brands to judge the name against. Defaults to `PROTECTED_BRANDS`. */
+  brands?: readonly ProtectedBrand[];
 }): PhishingAssessment {
-  const reasons = [...assessSender(input.fromName, input.fromAddress), ...assessLinks(input.html)];
+  const reasons = [
+    ...assessSender(input.fromName, input.fromAddress, input.brands),
+    ...assessLinks(input.html),
+  ];
   const level: PhishingLevel = reasons.some((r) => r.severity === 'danger')
     ? 'danger'
     : reasons.length > 0

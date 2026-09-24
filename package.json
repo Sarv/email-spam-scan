@@ -182,6 +182,7 @@
     "format": "prettier --write .",
     "format:check": "prettier --check .",
     "verify": "pnpm run lint && pnpm run format:check && pnpm run type-check && pnpm run test:coverage",
+    "verify:brands": "pnpm run build && node scripts/verify-brands.mjs --resolver 1.1.1.1",
     "clean": "rm -rf dist",
     "prepublishOnly": "pnpm run build"
   },

@@ -255,11 +255,15 @@ ones.
 the address belongs to another registrable domain. Compared at eTLD+1 via
 `tldts`, so `mail.paypal.com` vs `paypal.com` does **not** fire, while
 `paypal.com` vs `paypal.secure-login.ru` does. A name with no domain in it is
-checked against the protected brands in `src/data/brands.ts`: `"Adobe Acrobat
+checked against the protected brands in `src/data/brands/`: `"Adobe Acrobat
 Sign" <Adobesign@powersublinks.com>` borrows a name whose owner never writes
 from that domain, and is reported with the same severity — whatever SPF, DKIM
 and DMARC said about powersublinks.com, which the attacker owns and was free
-to authenticate.
+to authenticate. Every entry point that judges a sender takes an optional
+`brands` list (default `PROTECTED_BRANDS`), so a client can protect the
+mailbox owner's own organisation with `[...PROTECTED_BRANDS, own]`; pass the
+same list to the scorer and the shield, or they will disagree about a name.
+`pnpm verify:brands` audits the list against the registries and the DNS.
 
 **Authentication results** (`extractAuthHeaderBlock`, `parseAuthenticationHeaders`)
 — reads the SPF/DKIM/DMARC verdicts your own MTA already wrote into
@@ -965,11 +969,13 @@ are, but not nothing.
 - `registrableDomain(input): string | null` — eTLD+1
 - `domainOfAddress(address): string | null`
 - `domainsInText(text): string[]`
-- `assessSender(name, address): PhishingReason[]` — each reason carries a `kind`: `domain`, `brand` or `punycode`
-- `brandsNamedIn(text): ProtectedBrand[]`, `brandOwningDomain(host): ProtectedBrand | null`,
+- `assessSender(name, address, brands?): PhishingReason[]` — each reason carries a `kind`: `domain`, `brand` or `punycode`
+- `brandsNamedIn(text, brands?): ProtectedBrand[]`, `brandOwningDomain(host, brands?): ProtectedBrand | null`,
   `domainCarriesBrandName(brand, host): boolean`,
-  `impersonatedBrand(name, senderDomain): ProtectedBrand | null` — the brand rule in pieces
-- `PROTECTED_BRANDS` — the list, enrichable by pull request (see `src/data/brands.ts`)
+  `impersonatedBrand(name, senderDomain, brands?): ProtectedBrand | null` — the brand rule in pieces
+- `PROTECTED_BRANDS` — the list, one file per brand in `src/data/brands/`, enrichable by pull request.
+  `brands?` everywhere defaults to it; `SpamSignalInput`, `ContentSignalInput`, `SecurityInput`,
+  `assessPhishing` and `ScanOptions` take the same `brands` field
 
 ### Links — `@sarv-in/mailguard/links`
 

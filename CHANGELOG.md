@@ -28,6 +28,44 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - **`readBounded(response, maxBytes)`** (`/brand`) — the body half of
   `fetchBounded`, for a caller that needs the status code first. Shared with
   `/age`, so there is one place that refuses an oversized body.
+- **A `brands` option wherever a sender is judged** — `assessSender`,
+  `impersonatedBrand`, `brandsNamedIn`, `brandOwningDomain`, and the `brands`
+  field of `SpamSignalInput`, `ContentSignalInput`, `SecurityInput`,
+  `assessPhishing` and `ScanOptions`. It defaults to `PROTECTED_BRANDS`; a mail
+  client passes `[...PROTECTED_BRANDS, own]` to protect the mailbox owner's own
+  organisation without a pull request here, the way `matchSpamVocabulary`
+  already takes its groups. The domain lookup is now an index built once per
+  list rather than a scan per message.
+- **Provenance for the brand list.** `ProtectedBrand` gains `sources` (HTTPS
+  pages where the domains were checked) and `verified` (when). Required for
+  every brand added from now on; the 39 that predate the fields are named in
+  `test/brands.test.ts`, a list that can only shrink.
+- **`scripts/verify-brands.mjs`** (`pnpm verify:brands`) — every listed domain
+  checked against its registry (RDAP, or delegation where a ccTLD publishes
+  none), SPF and DMARC. Fails on a domain nobody has registered, which is the
+  dangerous direction: a listed domain may wear its brand's name
+  unchallenged, and an unregistered one can be bought. Runs weekly in CI and
+  on every pull request that touches the list.
+
+### Changed
+
+- **The brand list is one file per brand**, in `src/data/brands/`, assembled
+  by `index.ts`. `PROTECTED_BRANDS` and `ProtectedBrand` are exported exactly
+  as before. One file each makes an entry reviewable on its own, gives it a
+  history of its own and room for a note on why a domain is or is not there.
+
+### Fixed
+
+- **A brand name on a free mailbox address is judged again.** 0.3.0 listed
+  gmail.com and googlemail.com under Google, hotmail.com, live.com, msn.com and
+  outlook.com under Microsoft, and icloud.com, me.com and mac.com under Apple.
+  Anybody can open an address at those, and a listed domain is exempt from
+  `brand-impersonation` — so "Microsoft account team" <anyone@outlook.com>,
+  among the commonest lures there are, passed the rule written for it. Found
+  by the first run of `verify-brands`; the nine are removed, each brand's file
+  says why, and a test now refuses any listed domain that appears in the
+  freemail corpus unless it is named as an exception with its reason. The
+  brands' own notices come from their own domains and are unaffected.
 
 ## [0.3.0] - 2026-09-23
 

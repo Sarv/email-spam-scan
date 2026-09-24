@@ -27,7 +27,7 @@ import emailAddresses from 'email-addresses';
 import { FREEMAIL_DOMAINS } from '../data/freemail-domains.js';
 import { bulkHeaderSignals } from '../headers/bulk.js';
 import type { HeaderLookup } from '../headers/lookup.js';
-import { assessSender, domainOfAddress } from '../identity.js';
+import { assessSender, domainOfAddress, type ProtectedBrand } from '../identity.js';
 import { hasReplyPrefix, isValidMessageId } from '../rfc.js';
 import {
   assessmentOf,
@@ -77,6 +77,12 @@ export interface SpamSignalInput {
   headers?: HeaderLookup | null;
   /** The user has already reported this sender. */
   knownSpammer?: boolean;
+  /**
+   * The protected brands a display name is judged against for
+   * `brand-impersonation`. Defaults to `PROTECTED_BRANDS`; a mail client adds
+   * the mailbox owner's own organisation with `[...PROTECTED_BRANDS, own]`.
+   */
+  brands?: readonly ProtectedBrand[];
 }
 
 const FREEMAIL = new Set<string>(FREEMAIL_DOMAINS);
@@ -159,7 +165,7 @@ export function assessSpamSignals(input: SpamSignalInput): SpamAssessment {
   //    The domain check keeps firing on a list: a list does not put another
   //    domain into the author's name.
   const listMail = !!input.headers && !!bulkHeaderSignals(input.headers).listId;
-  for (const reason of assessSender(input.fromName, input.fromAddress)) {
+  for (const reason of assessSender(input.fromName, input.fromAddress, input.brands)) {
     switch (reason.kind) {
       case 'domain':
         add('display-name-spoof', 3, reason.text);

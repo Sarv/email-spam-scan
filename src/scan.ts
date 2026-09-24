@@ -36,7 +36,7 @@ import { extractAuthHeaderBlock, parseAuthenticationHeaders } from './headers/au
 import { headerLookupFromText, headerValuesFromText } from './headers/lookup.js';
 import { extractOriginIp } from './headers/origin-ip.js';
 import { receivedAt } from './headers/received-date.js';
-import { domainOfAddress } from './identity.js';
+import { domainOfAddress, type ProtectedBrand } from './identity.js';
 import { assessSpamSignals } from './rules/header-rules.js';
 import {
   mergeAssessments,
@@ -101,6 +101,12 @@ export interface ScanOptions {
    * contents put it — never lower, and never a penalty for the silence.
    */
   reputation?: SpamAssessment | null;
+  /**
+   * The protected brands the sender name and the link text are judged
+   * against. Defaults to `PROTECTED_BRANDS`; pass `[...PROTECTED_BRANDS, own]`
+   * to protect the recipient's own organisation too.
+   */
+  brands?: readonly ProtectedBrand[];
 }
 
 /** The parts of the message a caller usually wants back alongside the verdict. */
@@ -286,6 +292,7 @@ export function scanParsed(email: Email, options: ScanOptions = {}): ScanResult 
     auth,
     headers: lookup,
     knownSpammer: options.knownSpammer === true,
+    brands: options.brands,
   });
 
   const contentAssessment = assessContentSignals({
@@ -294,6 +301,7 @@ export function scanParsed(email: Email, options: ScanOptions = {}): ScanResult 
     html: email.html ?? null,
     // Whose name a deceptive link may borrow to look like the reader's own
     // site: everyone the message was addressed to.
+    brands: options.brands,
     recipientDomains: [...mailboxes(email.to), ...mailboxes(email.cc)].map((mailbox) =>
       domainOfAddress(mailbox.address),
     ),
