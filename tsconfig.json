@@ -26,7 +26,8 @@
       "@sarv-in/mailguard/verdict": ["./src/verdict.ts"],
       "@sarv-in/mailguard/identity": ["./src/identity.ts"],
       "@sarv-in/mailguard/links": ["./src/links.ts"],
-      "@sarv-in/mailguard/security": ["./src/security.ts"]
+      "@sarv-in/mailguard/security": ["./src/security.ts"],
+      "@sarv-in/mailguard/age": ["./src/age.ts"]
     }
   },
   "include": ["src", "test", "examples"],
